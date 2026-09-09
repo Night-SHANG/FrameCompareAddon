@@ -15,6 +15,9 @@ jobs:
       - name: Checkout FrameCompare
         uses: actions/checkout@v4
 
+      - name: Static source audit
+        run: python tools/static_audit.py
+
       - name: Configure
         run: cmake -S . -B build -A x64
 

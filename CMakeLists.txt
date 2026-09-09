@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(FrameCompare VERSION 1.2.0 LANGUAGES C CXX RC)
+project(FrameCompare VERSION 1.3.0 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "FrameCompare is a Windows ReShade add-on and must be built with a Windows toolchain.")
 endif()
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "FrameCompare v1.2 currently targets 64-bit ReShade only.")
+    message(FATAL_ERROR "FrameCompare v1.3 currently targets 64-bit ReShade only.")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -88,7 +88,6 @@ target_link_libraries(FrameCompare PRIVATE
     d3d12
     dxgi
     user32
-    gdi32
     psapi
 )
 
@@ -108,5 +107,7 @@ add_custom_command(TARGET FrameCompare POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/INSTALL_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/INSTALL_CN.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/FUNCTIONS_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/FUNCTIONS_CN.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/LOG_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/LOG_CN.md"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/AUDIT.md" "$<TARGET_FILE_DIR:FrameCompare>/package/AUDIT.md"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/CHANGELOG.md" "$<TARGET_FILE_DIR:FrameCompare>/package/CHANGELOG.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md" "$<TARGET_FILE_DIR:FrameCompare>/package/THIRD_PARTY.md"
 )

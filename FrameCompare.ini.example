@@ -1,27 +1,17 @@
-; FrameCompare v1.2 portable configuration (UTF-8)
-; Copy/rename this file to FrameCompare.ini beside 00-FrameCompare.addon64.
-; The same INI can be copied to other games to reuse UI language, hotkeys, labels and divider layout.
-;
-; General.Language:
-;   0 = 中文（默认）
-;   1 = English
-;
-; CaptureMode:
-;   0 = Auto: NGX Feature 18 when available, otherwise Before ReShade FX
-;   1 = NGX Feature 18 strict (D3D11/D3D12 pre-Evaluate Color)
-;   2 = Before ReShade FX (recommended for DLSS5 Feeder/effect-chain injection)
-;   3 = Application Present hook (generic, ordering-dependent)
-;
-; DisplayMode:
-;   0 = Normal wipe (same UV on both sides)
-;   1 = SplitScreenCR-style center remap
+; FrameCompare v1.3 portable configuration example
+; Hotkeys are stored as: VK,Ctrl,Shift,Alt
+; Configure them from the in-game UI whenever possible.
 
 [General]
 Enabled=1
 Language=0
-CaptureMode=0
+; 0 = Exact snapshot pair, 1 = Live pipeline
+Strategy=0
+; Live mode only: 0 = Auto NGX->PreFX, 1 = strict NGX Feature18, 2 = Pre-ReShade FX
+LiveCaptureMode=0
 BeforeOnLeft=1
-DisplayMode=0
+; 0 = normal wipe, 1 = SplitScreenCR-style split
+DisplayMode=1
 
 [Divider]
 Position=0.500000
@@ -40,39 +30,60 @@ DragGrabPx=14.000000
 
 [Labels]
 Show=1
-; 调试/排版模式：即使没有有效 Before/After，也强制持续显示两个标签。
-; 正常录制前建议关闭。
 Preview=0
 BeforeText=OFF
 AfterText=ON
-FontName=Segoe UI
-BeforeX=0.040000
-BeforeY=0.060000
-AfterX=0.880000
-AfterY=0.060000
+BeforeX=0.000000
+BeforeY=0.000000
+AfterX=1.000000
+AfterY=0.000000
 FontSizePx=42
 Opacity=1.000000
-OutlinePx=1.500000
+OutlinePx=2.000000
+MarginPx=18.000000
 
 [Hotkeys]
-; Windows virtual-key codes: F9=120, F10=121, F11=122, Left=37, Right=39, Home=36, End=35
-ToggleCompare=120
-ToggleFreeze=121
-ToggleAutoSweep=122
-MoveLeft=37
-MoveRight=39
-FullBefore=36
-FullAfter=35
+; F9
+ToggleCompare=120,0,0,0
+; F10 (Live mode freeze)
+ToggleFreeze=121,0,0,0
+; F11
+ToggleAutoSweep=122,0,0,0
+; Left / Right
+MoveLeft=37,0,0,0
+MoveRight=39,0,0,0
+; Ctrl+Left / Ctrl+Right (avoids default Home/End conflicts)
+FullBefore=37,1,0,0
+FullAfter=39,1,0,0
+; F7 / F8 exact captures
+CaptureBefore=118,0,0,0
+CaptureAfter=119,0,0,0
+
+[HUD]
+Count=0
+; HUD Source: 0=hotkey toggle, 1=actual ReShade Effects State,
+;             2=hotkey hold, 3=one-shot message.
+
+; Example: show the *actual* ReShade effects state.
+; No duplicate END hotkey is required because Source=1 polls ReShade itself.
+; Increase Count to 1 and uncomment this section to enable it.
+;
+; [HUD.0]
+; Enabled=1
+; Name=ReShadeState
+; Source=1
+; Hotkey=0,0,0,0
+; TextOn=ON
+; TextOff=OFF
+; InitialOn=1
+; X=0.500000
+; Y=0.080000
+; ShowSeconds=1.000000
 
 [NGX]
-; Accept only a recent NGX pre-Evaluate snapshot as belonging to the current frame.
 MaxSnapshotAgeMs=250
-; Default is D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE (0x40).
-; Some games/bridges use another state; change this only when D3D12 NGX capture is known to need it.
 D3D12ColorState=0x40
-; Unsafe because a shared handle does not synchronize private D3D12 queues/devices.
 AllowUnsafeCrossDevice=0
 
 [Diagnostics]
-; 0 = 只记录关键初始化/警告/错误；1 = 额外记录捕获来源变化等运行信息。
 VerboseLogging=0

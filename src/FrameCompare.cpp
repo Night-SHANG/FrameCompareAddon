@@ -18,6 +18,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -28,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
@@ -41,12 +44,17 @@ extern "C" __declspec(dllexport) const char *DESCRIPTION =
 
 namespace
 {
+    enum class capture_strategy : int
+    {
+        exact_snapshot_pair = 0,
+        live_pipeline = 1,
+    };
+
     enum class capture_mode : int
     {
         automatic = 0,
         ngx_feature18 = 1,
         before_reshade_fx = 2,
-        application_present = 3,
     };
 
     enum class display_mode : int
@@ -61,13 +69,56 @@ namespace
         english = 1,
     };
 
+    enum class hud_state_source : int
+    {
+        hotkey_toggle = 0,
+        reshade_effects_state = 1,
+        hotkey_hold = 2,
+        hotkey_pulse = 3,
+    };
+
+    enum class snapshot_target : int
+    {
+        none = 0,
+        before = 1,
+        after = 2,
+    };
+
+    struct hotkey
+    {
+        uint32_t vk = 0;
+        bool ctrl = false;
+        bool shift = false;
+        bool alt = false;
+    };
+
+    struct hud_indicator
+    {
+        bool enabled = true;
+        std::array<char, 96> name { 'I','n','d','i','c','a','t','o','r','\0' };
+        hud_state_source source = hud_state_source::hotkey_toggle;
+        hotkey key {};
+        std::array<char, 192> text_on { 'O','N','\0' };
+        std::array<char, 192> text_off { 'O','F','F','\0' };
+        bool initial_on = false;
+        float x = 0.50f;
+        float y = 0.12f;
+        float show_seconds = 1.0f; // 0 = persistent; new items default to a short notification
+
+        // Runtime-only state. Never serialized.
+        bool runtime_initialized = false;
+        bool runtime_on = false;
+        clock_type::time_point changed_at = clock_type::now();
+    };
+
     struct settings
     {
         bool enabled = true;
         ui_language language = ui_language::chinese;
+        capture_strategy strategy = capture_strategy::exact_snapshot_pair;
         capture_mode capture = capture_mode::automatic;
         bool before_on_left = true;
-        display_mode display = display_mode::normal_wipe;
+        display_mode display = display_mode::split_screen_cr;
 
         float split_position = 0.50f;
         float move_step = 0.02f;
@@ -88,22 +139,27 @@ namespace
         bool label_preview = false;
         std::array<char, 256> before_text { 'O', 'F', 'F', '\0' };
         std::array<char, 256> after_text { 'O', 'N', '\0' };
-        std::array<char, 128> font_name { 'S','e','g','o','e',' ','U','I','\0' };
-        float before_x = 0.04f;
-        float before_y = 0.06f;
-        float after_x = 0.88f;
-        float after_y = 0.06f;
+        float before_x = 0.00f;
+        float before_y = 0.00f;
+        float after_x = 1.00f;
+        float after_y = 0.00f;
         int font_size_px = 42;
         float label_opacity = 1.0f;
-        float outline_px = 1.5f;
+        float outline_px = 2.0f;
+        float osd_margin_px = 18.0f;
 
-        int hk_toggle_compare = VK_F9;
-        int hk_toggle_freeze = VK_F10;
-        int hk_toggle_auto = VK_F11;
-        int hk_left = VK_LEFT;
-        int hk_right = VK_RIGHT;
-        int hk_full_before = VK_HOME;
-        int hk_full_after = VK_END;
+        hotkey hk_toggle_compare { VK_F9 };
+        hotkey hk_toggle_freeze { VK_F10 };
+        hotkey hk_toggle_auto { VK_F11 };
+        hotkey hk_left { VK_LEFT };
+        hotkey hk_right { VK_RIGHT };
+        // Avoid ReShade's common Home/End bindings by default.
+        hotkey hk_full_before { VK_LEFT, true, false, false };
+        hotkey hk_full_after { VK_RIGHT, true, false, false };
+        hotkey hk_capture_before { VK_F7 };
+        hotkey hk_capture_after { VK_F8 };
+
+        std::vector<hud_indicator> hud_indicators;
 
         uint32_t ngx_max_age_ms = 250;
         uint32_t d3d12_color_state = static_cast<uint32_t>(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -116,6 +172,8 @@ namespace
     bool g_freeze_armed = false;
     bool g_auto_sweep_active = false;
     int g_auto_direction = 1;
+    int g_hotkey_capture_id = 0;
+    hotkey g_hotkey_candidate {};
 
     HMODULE g_addon_module = nullptr;
     HMODULE g_reshade_module = nullptr;
@@ -158,7 +216,6 @@ namespace
         if (text == "None") return "无";
         if (text == "Immediately before ReShade FX") return "ReShade FX 执行前";
         if (text == "Before ReShade FX (Auto fallback)") return "ReShade FX 执行前（自动模式回退）";
-        if (text == "Application Present hook backbuffer (ordering-dependent generic mode)") return "Application Present 后备缓冲（通用模式，结果依赖插件执行顺序）";
         if (text == "NGX Feature 18 strict mode: no fresh usable snapshot") return "严格 NGX Feature 18：当前帧没有可用的新快照";
         if (text == "NGX Feature 18 D3D11 Color (pre-Evaluate)") return "NGX Feature 18 D3D11 Color（Evaluate 前）";
         if (text == "NGX Feature 18 D3D12 Color (pre-Evaluate)") return "NGX Feature 18 D3D12 Color（Evaluate 前）";
@@ -174,12 +231,16 @@ namespace
         if (text == "ReShade D3D11 device does not expose ID3D11Device1 for shared NT handle import.") return "ReShade D3D11 设备没有提供共享 NT Handle 导入所需的 ID3D11Device1。";
         if (text == "Unable to open NGX D3D12 shared texture from D3D11.") return "无法从 D3D11 打开 NGX D3D12 共享纹理。";
         if (text == "NGX snapshot API does not match the ReShade runtime API.") return "NGX 快照 API 与当前 ReShade Runtime API 不匹配。";
+        if (text == "Capture waits until the ReShade settings overlay is closed, then copies the next visible backbuffer without FrameCompare OSD/composite.") return "等待 ReShade 设置面板关闭后捕获下一帧可见画面；FrameCompare 自身的 OSD 与分屏合成不会被录入。";
+        if (text == "Exact visible snapshot copy failed; request remains armed for the next frame.") return "精确可见画面复制失败；捕获请求保持待命，会在下一帧继续尝试。";
+        if (text == "Exact snapshot pair ready. Divider motion does not re-render either side.") return "精确 Before/After 画面对已就绪；移动分割线不会重新渲染任一侧。";
+        if (text == "Snapshot saved. Capture the other side to complete the exact pair.") return "当前一侧已保存；再捕获另一侧即可完成精确画面对。";
+        if (text == "Before/After captures are incompatible (size or format differs). Recapture both sides without changing output resolution/format.") return "Before/After 的尺寸或像素格式不一致；请保持输出分辨率/格式不变后重新捕获两侧。";
 
         return text; // 未识别的底层诊断保留原文，便于排错。
     }
 
     std::mutex g_runtime_mutex;
-    std::unordered_map<uint64_t, effect_runtime *> g_runtime_by_swapchain;
     effect_runtime *g_primary_runtime = nullptr;
 
     std::string trim(std::string s)
@@ -240,35 +301,82 @@ namespace
         return out;
     }
 
+    hotkey parse_hotkey_value(const std::string &text, hotkey fallback)
+    {
+        if (text.empty())
+            return fallback;
+
+        std::array<int, 4> values { static_cast<int>(fallback.vk), fallback.ctrl ? 1 : 0, fallback.shift ? 1 : 0, fallback.alt ? 1 : 0 };
+        std::stringstream ss(text);
+        std::string part;
+        size_t index = 0;
+        try
+        {
+            while (index < values.size() && std::getline(ss, part, ','))
+                values[index++] = std::stoi(trim(part), nullptr, 0);
+        }
+        catch (...)
+        {
+            return fallback;
+        }
+
+        hotkey out;
+        out.vk = static_cast<uint32_t>(std::clamp(values[0], 0, 255));
+        out.ctrl = values[1] != 0;
+        out.shift = values[2] != 0;
+        out.alt = values[3] != 0;
+        return out;
+    }
+
+    std::string hotkey_to_ini(const hotkey &key)
+    {
+        std::ostringstream out;
+        out << key.vk << ',' << (key.ctrl ? 1 : 0) << ',' << (key.shift ? 1 : 0) << ',' << (key.alt ? 1 : 0);
+        return out.str();
+    }
+
     void load_settings()
     {
         const auto ini = load_flat_ini(g_ini_path);
-        const auto get = [&](const char *key) -> std::string {
+        const auto get = [&](const std::string &key) -> std::string {
             const auto it = ini.find(key);
             return it == ini.end() ? std::string() : it->second;
         };
-        const auto geti = [&](const char *key, int fallback) {
+        const auto geti = [&](const std::string &key, int fallback) {
             try { const auto v = get(key); return v.empty() ? fallback : std::stoi(v, nullptr, 0); }
             catch (...) { return fallback; }
         };
-        const auto getu = [&](const char *key, uint32_t fallback) {
+        const auto getu = [&](const std::string &key, uint32_t fallback) {
             try { const auto v = get(key); return v.empty() ? fallback : static_cast<uint32_t>(std::stoul(v, nullptr, 0)); }
             catch (...) { return fallback; }
         };
-        const auto getf = [&](const char *key, float fallback) {
+        const auto getf = [&](const std::string &key, float fallback) {
             try { const auto v = get(key); return v.empty() ? fallback : std::stof(v); }
             catch (...) { return fallback; }
         };
-        const auto getb = [&](const char *key, bool fallback) {
+        const auto getb = [&](const std::string &key, bool fallback) {
             const auto v = get(key);
             return v.empty() ? fallback : parse_bool(v, fallback);
+        };
+        const auto get_hotkey = [&](const std::string &key, hotkey fallback) {
+            return parse_hotkey_value(get(key), fallback);
         };
 
         g_settings.enabled = getb("General.Enabled", g_settings.enabled);
         g_settings.language = static_cast<ui_language>(std::clamp(geti("General.Language", static_cast<int>(g_settings.language)), 0, 1));
-        g_settings.capture = static_cast<capture_mode>(std::clamp(geti("General.CaptureMode", static_cast<int>(g_settings.capture)), 0, 3));
+        const bool legacy_v12_ini = get("General.Strategy").empty();
+        g_settings.strategy = static_cast<capture_strategy>(std::clamp(geti("General.Strategy", static_cast<int>(g_settings.strategy)), 0, 1));
+        int live_capture = geti("General.LiveCaptureMode", geti("General.CaptureMode", static_cast<int>(g_settings.capture)));
+        if (live_capture < 0 || live_capture > 2)
+            live_capture = 0;
+        g_settings.capture = static_cast<capture_mode>(live_capture);
         g_settings.before_on_left = getb("General.BeforeOnLeft", g_settings.before_on_left);
         g_settings.display = static_cast<display_mode>(std::clamp(geti("General.DisplayMode", static_cast<int>(g_settings.display)), 0, 1));
+        if (legacy_v12_ini)
+        {
+            g_settings.strategy = capture_strategy::exact_snapshot_pair;
+            g_settings.display = display_mode::split_screen_cr;
+        }
 
         g_settings.split_position = std::clamp(getf("Divider.Position", g_settings.split_position), 0.0f, 1.0f);
         g_settings.move_step = std::clamp(getf("Divider.Step", g_settings.move_step), 0.001f, 1.0f);
@@ -288,7 +396,6 @@ namespace
         g_settings.label_preview = getb("Labels.Preview", g_settings.label_preview);
         if (const auto v = get("Labels.BeforeText"); !v.empty()) copy_cstr(g_settings.before_text, v);
         if (const auto v = get("Labels.AfterText"); !v.empty()) copy_cstr(g_settings.after_text, v);
-        if (const auto v = get("Labels.FontName"); !v.empty()) copy_cstr(g_settings.font_name, v);
         g_settings.before_x = std::clamp(getf("Labels.BeforeX", g_settings.before_x), 0.0f, 1.0f);
         g_settings.before_y = std::clamp(getf("Labels.BeforeY", g_settings.before_y), 0.0f, 1.0f);
         g_settings.after_x = std::clamp(getf("Labels.AfterX", g_settings.after_x), 0.0f, 1.0f);
@@ -296,25 +403,52 @@ namespace
         g_settings.font_size_px = std::clamp(geti("Labels.FontSizePx", g_settings.font_size_px), 8, 256);
         g_settings.label_opacity = std::clamp(getf("Labels.Opacity", g_settings.label_opacity), 0.0f, 1.0f);
         g_settings.outline_px = std::clamp(getf("Labels.OutlinePx", g_settings.outline_px), 0.0f, 12.0f);
+        g_settings.osd_margin_px = std::clamp(getf("Labels.MarginPx", g_settings.osd_margin_px), 0.0f, 200.0f);
 
-        g_settings.hk_toggle_compare = geti("Hotkeys.ToggleCompare", g_settings.hk_toggle_compare);
-        g_settings.hk_toggle_freeze = geti("Hotkeys.ToggleFreeze", g_settings.hk_toggle_freeze);
-        g_settings.hk_toggle_auto = geti("Hotkeys.ToggleAutoSweep", g_settings.hk_toggle_auto);
-        g_settings.hk_left = geti("Hotkeys.MoveLeft", g_settings.hk_left);
-        g_settings.hk_right = geti("Hotkeys.MoveRight", g_settings.hk_right);
-        g_settings.hk_full_before = geti("Hotkeys.FullBefore", g_settings.hk_full_before);
-        g_settings.hk_full_after = geti("Hotkeys.FullAfter", g_settings.hk_full_after);
+        g_settings.hk_toggle_compare = get_hotkey("Hotkeys.ToggleCompare", g_settings.hk_toggle_compare);
+        g_settings.hk_toggle_freeze = get_hotkey("Hotkeys.ToggleFreeze", g_settings.hk_toggle_freeze);
+        g_settings.hk_toggle_auto = get_hotkey("Hotkeys.ToggleAutoSweep", g_settings.hk_toggle_auto);
+        g_settings.hk_left = get_hotkey("Hotkeys.MoveLeft", g_settings.hk_left);
+        g_settings.hk_right = get_hotkey("Hotkeys.MoveRight", g_settings.hk_right);
+        g_settings.hk_full_before = get_hotkey("Hotkeys.FullBefore", g_settings.hk_full_before);
+        g_settings.hk_full_after = get_hotkey("Hotkeys.FullAfter", g_settings.hk_full_after);
+        g_settings.hk_capture_before = get_hotkey("Hotkeys.CaptureBefore", g_settings.hk_capture_before);
+        g_settings.hk_capture_after = get_hotkey("Hotkeys.CaptureAfter", g_settings.hk_capture_after);
+
+        g_settings.hud_indicators.clear();
+        const int indicator_count = std::clamp(geti("HUD.Count", 0), 0, 32);
+        g_settings.hud_indicators.reserve(static_cast<size_t>(indicator_count));
+        for (int i = 0; i < indicator_count; ++i)
+        {
+            hud_indicator item;
+            const std::string prefix = "HUD." + std::to_string(i) + ".";
+            item.enabled = getb(prefix + "Enabled", item.enabled);
+            if (const auto v = get(prefix + "Name"); !v.empty()) copy_cstr(item.name, v);
+            item.source = static_cast<hud_state_source>(std::clamp(geti(prefix + "Source", static_cast<int>(item.source)), 0, 3));
+            item.key = get_hotkey(prefix + "Hotkey", item.key);
+            if (const auto v = get(prefix + "TextOn"); !v.empty()) copy_cstr(item.text_on, v);
+            if (const auto v = get(prefix + "TextOff"); !v.empty()) copy_cstr(item.text_off, v);
+            item.initial_on = getb(prefix + "InitialOn", item.initial_on);
+            item.x = std::clamp(getf(prefix + "X", item.x), 0.0f, 1.0f);
+            item.y = std::clamp(getf(prefix + "Y", item.y), 0.0f, 1.0f);
+            item.show_seconds = std::clamp(getf(prefix + "ShowSeconds", item.show_seconds), 0.0f, 60.0f);
+            item.runtime_initialized = false;
+            item.runtime_on = item.initial_on;
+            item.changed_at = clock_type::now();
+            g_settings.hud_indicators.push_back(item);
+        }
 
         g_settings.ngx_max_age_ms = std::clamp(getu("NGX.MaxSnapshotAgeMs", g_settings.ngx_max_age_ms), 1u, 5000u);
         g_settings.d3d12_color_state = getu("NGX.D3D12ColorState", g_settings.d3d12_color_state);
         g_settings.allow_unsafe_cross_device_ngx = getb("NGX.AllowUnsafeCrossDevice", g_settings.allow_unsafe_cross_device_ngx);
         g_settings.verbose_logging = getb("Diagnostics.VerboseLogging", g_settings.verbose_logging);
 
-        // Transient recording state always starts clean even when a portable INI is reused.
         g_frozen = false;
         g_freeze_armed = false;
         g_auto_sweep_active = false;
         g_auto_direction = g_settings.auto_sweep_direction;
+        g_hotkey_capture_id = 0;
+        g_hotkey_candidate = {};
     }
 
     void save_settings()
@@ -328,12 +462,13 @@ namespace
             return;
         }
 
-        f << "; FrameCompare portable configuration (UTF-8)\n";
-        f << "; Copy this INI together with 00-FrameCompare.addon64 to reuse the same controls and layout.\n\n";
+        f << "; FrameCompare v1.3 portable configuration (UTF-8)\n";
+        f << "; Hotkeys are stored as VK,Ctrl,Shift,Alt. Use the in-game key capture UI instead of editing numbers.\n\n";
         f << "[General]\n";
         f << "Enabled=" << (g_settings.enabled ? 1 : 0) << "\n";
         f << "Language=" << static_cast<int>(g_settings.language) << "\n";
-        f << "CaptureMode=" << static_cast<int>(g_settings.capture) << "\n";
+        f << "Strategy=" << static_cast<int>(g_settings.strategy) << "\n";
+        f << "LiveCaptureMode=" << static_cast<int>(g_settings.capture) << "\n";
         f << "BeforeOnLeft=" << (g_settings.before_on_left ? 1 : 0) << "\n";
         f << "DisplayMode=" << static_cast<int>(g_settings.display) << "\n\n";
 
@@ -357,32 +492,51 @@ namespace
         f << "Preview=" << (g_settings.label_preview ? 1 : 0) << "\n";
         f << "BeforeText=" << g_settings.before_text.data() << "\n";
         f << "AfterText=" << g_settings.after_text.data() << "\n";
-        f << "FontName=" << g_settings.font_name.data() << "\n";
         f << "BeforeX=" << g_settings.before_x << "\n";
         f << "BeforeY=" << g_settings.before_y << "\n";
         f << "AfterX=" << g_settings.after_x << "\n";
         f << "AfterY=" << g_settings.after_y << "\n";
         f << "FontSizePx=" << g_settings.font_size_px << "\n";
         f << "Opacity=" << g_settings.label_opacity << "\n";
-        f << "OutlinePx=" << g_settings.outline_px << "\n\n";
+        f << "OutlinePx=" << g_settings.outline_px << "\n";
+        f << "MarginPx=" << g_settings.osd_margin_px << "\n\n";
 
         f << "[Hotkeys]\n";
-        f << "ToggleCompare=" << g_settings.hk_toggle_compare << "\n";
-        f << "ToggleFreeze=" << g_settings.hk_toggle_freeze << "\n";
-        f << "ToggleAutoSweep=" << g_settings.hk_toggle_auto << "\n";
-        f << "MoveLeft=" << g_settings.hk_left << "\n";
-        f << "MoveRight=" << g_settings.hk_right << "\n";
-        f << "FullBefore=" << g_settings.hk_full_before << "\n";
-        f << "FullAfter=" << g_settings.hk_full_after << "\n\n";
+        f << "ToggleCompare=" << hotkey_to_ini(g_settings.hk_toggle_compare) << "\n";
+        f << "ToggleFreeze=" << hotkey_to_ini(g_settings.hk_toggle_freeze) << "\n";
+        f << "ToggleAutoSweep=" << hotkey_to_ini(g_settings.hk_toggle_auto) << "\n";
+        f << "MoveLeft=" << hotkey_to_ini(g_settings.hk_left) << "\n";
+        f << "MoveRight=" << hotkey_to_ini(g_settings.hk_right) << "\n";
+        f << "FullBefore=" << hotkey_to_ini(g_settings.hk_full_before) << "\n";
+        f << "FullAfter=" << hotkey_to_ini(g_settings.hk_full_after) << "\n";
+        f << "CaptureBefore=" << hotkey_to_ini(g_settings.hk_capture_before) << "\n";
+        f << "CaptureAfter=" << hotkey_to_ini(g_settings.hk_capture_after) << "\n\n";
+
+        f << "[HUD]\n";
+        f << "Count=" << g_settings.hud_indicators.size() << "\n\n";
+        for (size_t i = 0; i < g_settings.hud_indicators.size(); ++i)
+        {
+            const auto &item = g_settings.hud_indicators[i];
+            f << "[HUD." << i << "]\n";
+            f << "Enabled=" << (item.enabled ? 1 : 0) << "\n";
+            f << "Name=" << item.name.data() << "\n";
+            f << "Source=" << static_cast<int>(item.source) << "\n";
+            f << "Hotkey=" << hotkey_to_ini(item.key) << "\n";
+            f << "TextOn=" << item.text_on.data() << "\n";
+            f << "TextOff=" << item.text_off.data() << "\n";
+            f << "InitialOn=" << (item.initial_on ? 1 : 0) << "\n";
+            f << "X=" << item.x << "\n";
+            f << "Y=" << item.y << "\n";
+            f << "ShowSeconds=" << item.show_seconds << "\n\n";
+        }
 
         f << "[NGX]\n";
         f << "MaxSnapshotAgeMs=" << g_settings.ngx_max_age_ms << "\n";
         f << "D3D12ColorState=0x" << std::hex << std::uppercase << g_settings.d3d12_color_state << std::dec << "\n";
         f << "AllowUnsafeCrossDevice=" << (g_settings.allow_unsafe_cross_device_ngx ? 1 : 0) << "\n\n";
-
         f << "[Diagnostics]\n";
         f << "VerboseLogging=" << (g_settings.verbose_logging ? 1 : 0) << "\n";
-
+        f.flush();
         g_settings_dirty = false;
         g_last_ini_save = clock_type::now();
     }
@@ -417,7 +571,8 @@ namespace
 
     void sync_ngx_capture_enabled()
     {
-        const bool wants_ngx = g_settings.capture == capture_mode::automatic || g_settings.capture == capture_mode::ngx_feature18;
+        const bool wants_ngx = g_settings.strategy == capture_strategy::live_pipeline &&
+            (g_settings.capture == capture_mode::automatic || g_settings.capture == capture_mode::ngx_feature18);
         framecompare::ngx::set_d3d12_color_state(static_cast<D3D12_RESOURCE_STATES>(g_settings.d3d12_color_state));
         framecompare::ngx::set_capture_enabled(g_settings.enabled && !g_frozen && wants_ngx);
     }
@@ -431,14 +586,6 @@ namespace
         format fmt = format::unknown;
         bool shader_state = false;
         bool ready = false;
-    };
-
-    struct label_texture
-    {
-        resource tex = {};
-        resource_view srv = {};
-        uint32_t width = 1;
-        uint32_t height = 1;
     };
 
     struct parameter_texture
@@ -460,15 +607,15 @@ namespace
     {
         gpu_texture before;
         gpu_texture after;
-        label_texture before_label;
-        label_texture after_label;
         parameter_texture params;
 
         effect_technique composite = {};
         bool warned_missing_fx = false;
         bool warned_param_upload = false;
-        bool labels_dirty = true;
         bool pair_valid = false;
+        bool exact_before_valid = false;
+        bool exact_after_valid = false;
+        snapshot_target pending_snapshot = snapshot_target::none;
         bool fallback_before_this_cycle = false;
         bool before_this_cycle = false;
         bool overlay_open = false;
@@ -476,8 +623,6 @@ namespace
 
         uint64_t effect_cycle = 0;
         uint64_t last_ngx_generation = 0;
-        uint64_t present_capture_generation = 0;
-        uint64_t last_present_used = 0;
         clock_type::time_point last_tick = clock_type::now();
 
         move_key_state left_key;
@@ -489,6 +634,7 @@ namespace
         std::string last_logged_ngx_error;
         uint64_t last_logged_ngx_failures = 0;
         bool logged_pair_ready = false;
+        bool warned_incompatible_pair = false;
         uint32_t before_width = 0;
         uint32_t before_height = 0;
         uint32_t after_width = 0;
@@ -502,15 +648,6 @@ namespace
     };
 
     void destroy_gpu_texture(device *dev, gpu_texture &t)
-    {
-        if (t.srv != 0)
-            dev->destroy_resource_view(t.srv);
-        if (t.tex != 0)
-            dev->destroy_resource(t.tex);
-        t = {};
-    }
-
-    void destroy_label_texture(device *dev, label_texture &t)
     {
         if (t.srv != 0)
             dev->destroy_resource_view(t.srv);
@@ -533,6 +670,51 @@ namespace
         return t.tex != 0 && t.width == src_desc.texture.width && t.height == src_desc.texture.height && t.fmt == src_desc.texture.format;
     }
 
+    bool capture_pair_compatible(const gpu_texture &before, const gpu_texture &after)
+    {
+        if (!before.ready || !after.ready || before.tex == 0 || after.tex == 0)
+            return false;
+        if (before.width != after.width || before.height != after.height)
+            return false;
+
+        const format before_typed = format_to_default_typed(before.fmt);
+        const format after_typed = format_to_default_typed(after.fmt);
+        return before_typed != format::unknown && before_typed == after_typed;
+    }
+
+    void update_pair_validity(runtime_state *state, bool require_exact_snapshots)
+    {
+        if (state == nullptr)
+            return;
+
+        const bool captures_present = require_exact_snapshots
+            ? (state->exact_before_valid && state->exact_after_valid && state->before.ready && state->after.ready)
+            : (state->before.ready && state->after.ready);
+
+        if (!captures_present)
+        {
+            state->pair_valid = false;
+            state->warned_incompatible_pair = false;
+            return;
+        }
+
+        state->pair_valid = capture_pair_compatible(state->before, state->after);
+        if (state->pair_valid)
+        {
+            state->warned_incompatible_pair = false;
+            return;
+        }
+
+        state->capture_note = "Before/After captures are incompatible (size or format differs). Recapture both sides without changing output resolution/format.";
+        if (!state->warned_incompatible_pair)
+        {
+            fc_log(reshade::log::level::warning,
+                "Before/After 尺寸或像素格式不一致，已拒绝合成。请保持输出分辨率/格式不变后重新捕获两侧。",
+                "Before/After size or pixel format differs; composition is disabled. Recapture both sides without changing output resolution/format.");
+            state->warned_incompatible_pair = true;
+        }
+    }
+
     bool ensure_capture_texture(effect_runtime *runtime, gpu_texture &target, resource source, const char *debug_name)
     {
         device *dev = runtime->get_device();
@@ -543,8 +725,11 @@ namespace
         if (compatible_capture_desc(target, src_desc))
             return true;
 
-        runtime->get_command_queue()->wait_idle();
-        destroy_gpu_texture(dev, target);
+        if (target.tex != 0 || target.srv != 0)
+        {
+            runtime->get_command_queue()->wait_idle();
+            destroy_gpu_texture(dev, target);
+        }
 
         const format typed = format_to_default_typed(src_desc.texture.format);
         if (typed == format::unknown || !dev->check_format_support(typed, resource_usage::shader_resource))
@@ -600,135 +785,6 @@ namespace
         return true;
     }
 
-    std::wstring utf8_to_wide(const char *text)
-    {
-        if (text == nullptr || *text == '\0')
-            return L" ";
-        const int input_len = static_cast<int>(std::strlen(text));
-        const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, input_len, nullptr, 0);
-        if (count <= 0)
-            return L" ";
-        std::wstring out(static_cast<size_t>(count), L'\0');
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, input_len, out.data(), count);
-        return out;
-    }
-
-    std::vector<uint8_t> rasterize_text(const char *utf8, const char *font_utf8, int font_px, uint32_t &out_w, uint32_t &out_h)
-    {
-        const std::wstring text = utf8_to_wide(utf8);
-        const std::wstring font_name = utf8_to_wide(font_utf8);
-        HDC dc = CreateCompatibleDC(nullptr);
-        if (!dc)
-        {
-            out_w = out_h = 1;
-            return std::vector<uint8_t>(4, 0);
-        }
-
-        HFONT font = CreateFontW(-font_px, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE, font_name.c_str());
-        if (!font)
-            font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        HGDIOBJ old_font = SelectObject(dc, font);
-
-        SIZE size = {};
-        GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &size);
-        out_w = static_cast<uint32_t>(std::max<LONG>(8, size.cx + 20));
-        out_h = static_cast<uint32_t>(std::max<LONG>(8, size.cy + 14));
-
-        BITMAPINFO bmi = {};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = static_cast<LONG>(out_w);
-        bmi.bmiHeader.biHeight = -static_cast<LONG>(out_h);
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-
-        void *bits = nullptr;
-        HBITMAP bmp = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (!bmp || !bits)
-        {
-            if (bmp) DeleteObject(bmp);
-            SelectObject(dc, old_font);
-            if (font && font != GetStockObject(DEFAULT_GUI_FONT)) DeleteObject(font);
-            DeleteDC(dc);
-            out_w = out_h = 1;
-            return std::vector<uint8_t>(4, 0);
-        }
-
-        HGDIOBJ old_bmp = SelectObject(dc, bmp);
-        std::memset(bits, 0, static_cast<size_t>(out_w) * out_h * 4);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(255, 255, 255));
-        RECT r { 10, 5, static_cast<LONG>(out_w - 4), static_cast<LONG>(out_h - 2) };
-        DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &r, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
-
-        std::vector<uint8_t> rgba(static_cast<size_t>(out_w) * out_h * 4);
-        const uint8_t *src = static_cast<const uint8_t *>(bits);
-        for (size_t i = 0, n = static_cast<size_t>(out_w) * out_h; i < n; ++i)
-        {
-            const uint8_t coverage = std::max({ src[i * 4 + 0], src[i * 4 + 1], src[i * 4 + 2] });
-            rgba[i * 4 + 0] = 255;
-            rgba[i * 4 + 1] = 255;
-            rgba[i * 4 + 2] = 255;
-            rgba[i * 4 + 3] = coverage;
-        }
-
-        SelectObject(dc, old_bmp);
-        SelectObject(dc, old_font);
-        DeleteObject(bmp);
-        if (font && font != GetStockObject(DEFAULT_GUI_FONT))
-            DeleteObject(font);
-        DeleteDC(dc);
-        return rgba;
-    }
-
-    bool create_label_texture(effect_runtime *runtime, label_texture &target, const char *text)
-    {
-        uint32_t width = 1, height = 1;
-        const auto pixels = rasterize_text(text, g_settings.font_name.data(), g_settings.font_size_px, width, height);
-        subresource_data initial = {};
-        initial.data = const_cast<uint8_t *>(pixels.data());
-        initial.row_pitch = static_cast<uint64_t>(width) * 4;
-        initial.slice_pitch = initial.row_pitch * height;
-
-        device *dev = runtime->get_device();
-        if (!dev->create_resource(
-                resource_desc(width, height, 1, 1, format::r8g8b8a8_unorm, 1, memory_heap::default_, resource_usage::shader_resource),
-                &initial, resource_usage::shader_resource, &target.tex))
-            return false;
-        if (!dev->create_resource_view(target.tex, resource_usage::shader_resource, resource_view_desc(format::r8g8b8a8_unorm), &target.srv))
-        {
-            dev->destroy_resource(target.tex);
-            target = {};
-            return false;
-        }
-        target.width = width;
-        target.height = height;
-        return true;
-    }
-
-    void rebuild_labels(effect_runtime *runtime, runtime_state *state)
-    {
-        runtime->get_command_queue()->wait_idle();
-        device *dev = runtime->get_device();
-        destroy_label_texture(dev, state->before_label);
-        destroy_label_texture(dev, state->after_label);
-
-        const bool a = create_label_texture(runtime, state->before_label, g_settings.before_text.data());
-        const bool b = create_label_texture(runtime, state->after_label, g_settings.after_text.data());
-        if (!a || !b)
-            fc_log(reshade::log::level::warning,
-                "一个或多个文字标签纹理生成失败。请检查字体名称和文字内容。",
-                "Failed to rasterize one or more label textures. Check the font name and label text.");
-
-        if (state->before_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_BEFORE", state->before_label.srv, state->before_label.srv);
-        if (state->after_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_AFTER", state->after_label.srv, state->after_label.srv);
-        state->labels_dirty = false;
-    }
-
     bool ensure_parameter_texture(effect_runtime *runtime, runtime_state *state)
     {
         if (state->params.available)
@@ -758,52 +814,19 @@ namespace
 
     bool update_parameter_texture(effect_runtime *runtime, runtime_state *state, command_list *cmd)
     {
-        if (!ensure_parameter_texture(runtime, state))
+        if (!ensure_parameter_texture(runtime, state) || cmd == nullptr)
             return false;
 
-        uint32_t screen_w = 1, screen_h = 1;
-        runtime->get_screenshot_width_and_height(&screen_w, &screen_h);
-        screen_w = std::max(screen_w, 1u);
-        screen_h = std::max(screen_h, 1u);
-
-        const float before_w = static_cast<float>(state->before_label.width) / static_cast<float>(screen_w);
-        const float before_h = static_cast<float>(state->before_label.height) / static_cast<float>(screen_h);
-        const float after_w = static_cast<float>(state->after_label.width) / static_cast<float>(screen_w);
-        const float after_h = static_cast<float>(state->after_label.height) / static_cast<float>(screen_h);
-
         std::array<float, 32> p = {};
-        // texel 0: divider
-        p[0] = g_settings.split_position;
-        p[1] = g_settings.border_width;
-        p[2] = g_settings.border_opacity;
+        // texel 0: split, divider width, divider opacity, show divider
+        p[0] = std::clamp(g_settings.split_position, 0.0f, 1.0f);
+        p[1] = std::max(0.0f, g_settings.border_width);
+        p[2] = std::clamp(g_settings.border_opacity, 0.0f, 1.0f);
         p[3] = g_settings.show_border ? 1.0f : 0.0f;
-        // texel 1: global flags
+        // texel 1: before-on-left, display mode, pair-valid, reserved
         p[4] = g_settings.before_on_left ? 1.0f : 0.0f;
-        // Label placement preview deliberately forces labels visible even when the
-        // normal Show switch is off, so layout can be tuned independently.
-        p[5] = (g_settings.show_labels || g_settings.label_preview) ? 1.0f : 0.0f;
-        p[6] = g_settings.label_opacity;
-        p[7] = g_settings.outline_px;
-        // texel 2: before label rect
-        p[8] = g_settings.before_x;
-        p[9] = g_settings.before_y;
-        p[10] = before_w;
-        p[11] = before_h;
-        // texel 3: after label rect
-        p[12] = g_settings.after_x;
-        p[13] = g_settings.after_y;
-        p[14] = after_w;
-        p[15] = after_h;
-        // texel 4: label texel size
-        p[16] = 1.0f / static_cast<float>(std::max(state->before_label.width, 1u));
-        p[17] = 1.0f / static_cast<float>(std::max(state->before_label.height, 1u));
-        p[18] = 1.0f / static_cast<float>(std::max(state->after_label.width, 1u));
-        p[19] = 1.0f / static_cast<float>(std::max(state->after_label.height, 1u));
-        // texel 5: display/preview flags
-        p[20] = static_cast<float>(static_cast<int>(g_settings.display));
-        p[21] = g_settings.label_preview ? 1.0f : 0.0f;
-        p[22] = (g_settings.enabled && state->pair_valid && state->before.ready && state->after.ready) ? 1.0f : 0.0f;
-        // p[23] and texels 6/7 are reserved for forward compatibility.
+        p[5] = static_cast<float>(static_cast<int>(g_settings.display));
+        p[6] = (g_settings.enabled && state->pair_valid && state->before.ready && state->after.ready) ? 1.0f : 0.0f;
 
         if (state->params.shader_state)
             cmd->barrier(state->params.tex, resource_usage::shader_resource, resource_usage::copy_dest);
@@ -838,10 +861,6 @@ namespace
             runtime->update_texture_bindings("FRAMECOMPARE_BEFORE", state->before.srv, state->before.srv);
         if (state->after.srv != 0)
             runtime->update_texture_bindings("FRAMECOMPARE_AFTER", state->after.srv, state->after.srv);
-        if (state->before_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_BEFORE", state->before_label.srv, state->before_label.srv);
-        if (state->after_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_AFTER", state->after_label.srv, state->after_label.srv);
     }
 
     bool is_primary_runtime(effect_runtime *runtime)
@@ -852,8 +871,173 @@ namespace
         return g_primary_runtime == runtime;
     }
 
+    bool hotkey_modifiers_match(effect_runtime *runtime, const hotkey &key)
+    {
+        const bool ctrl = runtime->is_key_down(VK_CONTROL);
+        const bool shift = runtime->is_key_down(VK_SHIFT);
+        const bool alt = runtime->is_key_down(VK_MENU);
+        return ctrl == key.ctrl && shift == key.shift && alt == key.alt;
+    }
+
+    bool hotkey_pressed(effect_runtime *runtime, const hotkey &key)
+    {
+        return key.vk != 0 && runtime->is_key_pressed(key.vk) && hotkey_modifiers_match(runtime, key);
+    }
+
+    bool hotkey_down(effect_runtime *runtime, const hotkey &key)
+    {
+        return key.vk != 0 && runtime->is_key_down(key.vk) && hotkey_modifiers_match(runtime, key);
+    }
+
+    const char *key_name(uint32_t vk)
+    {
+        static char text[32];
+        if (vk == 0) return tr("未设置", "Not set");
+        if (vk >= VK_F1 && vk <= VK_F24)
+        {
+            std::snprintf(text, sizeof(text), "F%u", vk - VK_F1 + 1);
+            return text;
+        }
+        if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+        {
+            text[0] = static_cast<char>(vk);
+            text[1] = '\0';
+            return text;
+        }
+        switch (vk)
+        {
+        case VK_LEFT: return "Left";
+        case VK_RIGHT: return "Right";
+        case VK_UP: return "Up";
+        case VK_DOWN: return "Down";
+        case VK_HOME: return "Home";
+        case VK_END: return "End";
+        case VK_INSERT: return "Insert";
+        case VK_DELETE: return "Delete";
+        case VK_PRIOR: return "PageUp";
+        case VK_NEXT: return "PageDown";
+        case VK_PAUSE: return "Pause";
+        case VK_SNAPSHOT: return "PrintScreen";
+        case VK_TAB: return "Tab";
+        case VK_SPACE: return "Space";
+        case VK_RETURN: return "Enter";
+        case VK_ESCAPE: return "Esc";
+        case VK_BACK: return "Backspace";
+        case VK_CAPITAL: return "CapsLock";
+        case VK_NUMPAD0: return "Num0";
+        case VK_NUMPAD1: return "Num1";
+        case VK_NUMPAD2: return "Num2";
+        case VK_NUMPAD3: return "Num3";
+        case VK_NUMPAD4: return "Num4";
+        case VK_NUMPAD5: return "Num5";
+        case VK_NUMPAD6: return "Num6";
+        case VK_NUMPAD7: return "Num7";
+        case VK_NUMPAD8: return "Num8";
+        case VK_NUMPAD9: return "Num9";
+        default:
+            std::snprintf(text, sizeof(text), "VK %u", vk);
+            return text;
+        }
+    }
+
+    std::string hotkey_description(const hotkey &key)
+    {
+        if (key.vk == 0)
+            return tr("未设置", "Not set");
+        std::string out;
+        if (key.ctrl) out += "Ctrl+";
+        if (key.shift) out += "Shift+";
+        if (key.alt) out += "Alt+";
+        out += key_name(key.vk);
+        return out;
+    }
+
+    void begin_hotkey_capture(int id)
+    {
+        g_hotkey_capture_id = id;
+        g_hotkey_candidate = {};
+    }
+
+    void cancel_hotkey_capture()
+    {
+        g_hotkey_capture_id = 0;
+        g_hotkey_candidate = {};
+    }
+
+    void collect_hotkey_candidate(effect_runtime *runtime)
+    {
+        if (g_hotkey_capture_id == 0)
+            return;
+        for (uint32_t vk = 7; vk < 256; ++vk)
+        {
+            if (vk == VK_CONTROL || vk == VK_SHIFT || vk == VK_MENU || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_LMENU || vk == VK_RMENU)
+                continue;
+            if (!runtime->is_key_pressed(vk))
+                continue;
+            g_hotkey_candidate.vk = vk;
+            g_hotkey_candidate.ctrl = runtime->is_key_down(VK_CONTROL);
+            g_hotkey_candidate.shift = runtime->is_key_down(VK_SHIFT);
+            g_hotkey_candidate.alt = runtime->is_key_down(VK_MENU);
+            break;
+        }
+    }
+
+    bool draw_hotkey_row(effect_runtime *runtime, const char *label, int id, hotkey &value)
+    {
+        ImGui::PushID(id);
+        const bool capturing = g_hotkey_capture_id == id;
+        std::string desc = capturing ? hotkey_description(g_hotkey_candidate) : hotkey_description(value);
+        if (capturing && g_hotkey_candidate.vk == 0)
+            desc = tr("按下快捷键…", "Press a shortcut...");
+
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(190.0f);
+        char buffer[96] = {};
+        std::snprintf(buffer, sizeof(buffer), "%s", desc.c_str());
+        ImGui::SetNextItemWidth(190.0f);
+        ImGui::InputText("##Key", buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::IsItemClicked())
+            begin_hotkey_capture(id);
+
+        bool changed = false;
+        if (capturing)
+        {
+            collect_hotkey_candidate(runtime);
+            ImGui::SameLine();
+            if (ImGui::SmallButton(tr("确定", "Apply")) && g_hotkey_candidate.vk != 0)
+            {
+                value = g_hotkey_candidate;
+                cancel_hotkey_capture();
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton(tr("取消", "Cancel")))
+                cancel_hotkey_capture();
+        }
+        else
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton(tr("清除", "Clear")))
+            {
+                value = {};
+                changed = true;
+            }
+        }
+        ImGui::PopID();
+        return changed;
+    }
+
     void set_freeze_requested(runtime_state *state, bool freeze)
     {
+        if (g_settings.strategy == capture_strategy::exact_snapshot_pair)
+        {
+            // Exact snapshot pairs are frozen by definition.
+            g_frozen = false;
+            g_freeze_armed = false;
+            return;
+        }
+
         if (!freeze)
         {
             g_frozen = false;
@@ -895,9 +1079,9 @@ namespace
             start_auto_sweep();
     }
 
-    void process_move_key(effect_runtime *runtime, move_key_state &state, uint32_t vk, int direction, float dt, clock_type::time_point now)
+    void process_move_key(effect_runtime *runtime, move_key_state &state, const hotkey &key, int direction, float dt, clock_type::time_point now)
     {
-        const bool down = runtime->is_key_down(vk);
+        const bool down = hotkey_down(runtime, key);
         if (down && !state.was_down)
         {
             state.pressed_at = now;
@@ -998,6 +1182,77 @@ namespace
         }
     }
 
+    void arm_snapshot_capture(runtime_state *state, snapshot_target target)
+    {
+        if (state == nullptr || target == snapshot_target::none)
+            return;
+        state->pending_snapshot = target;
+        if (target == snapshot_target::before)
+            state->exact_before_valid = false;
+        else
+            state->exact_after_valid = false;
+        state->pair_valid = false;
+        state->logged_pair_ready = false;
+        state->warned_incompatible_pair = false;
+        g_frozen = false;
+        g_freeze_armed = false;
+        g_auto_sweep_active = false;
+        state->capture_source = target == snapshot_target::before ? "Exact visible Before snapshot armed" : "Exact visible After snapshot armed";
+        state->capture_note = "Capture waits until the ReShade settings overlay is closed, then copies the next visible backbuffer without FrameCompare OSD/composite.";
+    }
+
+    void update_hud_indicator_states(effect_runtime *runtime)
+    {
+        const auto now = clock_type::now();
+        for (auto &item : g_settings.hud_indicators)
+        {
+            if (!item.enabled)
+                continue;
+
+            bool next = item.runtime_on;
+            if (!item.runtime_initialized)
+            {
+                if (item.source == hud_state_source::reshade_effects_state)
+                    next = runtime->get_effects_state();
+                else if (item.source == hud_state_source::hotkey_hold)
+                    next = hotkey_down(runtime, item.key);
+                else if (item.source == hud_state_source::hotkey_pulse)
+                    next = false;
+                else
+                    next = item.initial_on;
+                item.runtime_on = next;
+                item.runtime_initialized = true;
+                // Pulse items should stay hidden until the first actual press.
+                item.changed_at = item.source == hud_state_source::hotkey_pulse
+                    ? clock_type::time_point::min()
+                    : now;
+            }
+
+            if (item.source == hud_state_source::hotkey_pulse)
+            {
+                if (g_hotkey_capture_id == 0 && hotkey_pressed(runtime, item.key))
+                {
+                    item.runtime_on = true;
+                    item.changed_at = now;
+                }
+                continue;
+            }
+
+            if (item.source == hud_state_source::reshade_effects_state)
+                next = runtime->get_effects_state();
+            else if (item.source == hud_state_source::hotkey_hold)
+                next = hotkey_down(runtime, item.key);
+            else if (g_hotkey_capture_id == 0 && hotkey_pressed(runtime, item.key))
+                next = !item.runtime_on;
+
+            if (next != item.runtime_on)
+            {
+                item.runtime_on = next;
+                item.changed_at = now;
+            }
+        }
+    }
+
     void update_hotkeys(effect_runtime *runtime, runtime_state *state)
     {
         if (!is_primary_runtime(runtime))
@@ -1008,14 +1263,18 @@ namespace
         state->last_tick = now;
         dt = std::clamp(dt, 0.0f, 0.10f);
 
-        if (runtime->is_key_pressed(g_settings.hk_toggle_compare))
+        update_hud_indicator_states(runtime);
+
+        if (g_hotkey_capture_id != 0)
+        {
+            collect_hotkey_candidate(runtime);
+            maybe_save_settings();
+            return;
+        }
+
+        if (hotkey_pressed(runtime, g_settings.hk_toggle_compare))
         {
             g_settings.enabled = !g_settings.enabled;
-            // A preview-only frame may have reused the After capture as its neutral
-            // background. Never revive an old/mixed pair when comparison is toggled.
-            state->pair_valid = false;
-            state->before_this_cycle = false;
-            state->fallback_before_this_cycle = false;
             if (!g_settings.enabled)
             {
                 g_auto_sweep_active = false;
@@ -1025,25 +1284,36 @@ namespace
             mark_settings_dirty();
             sync_ngx_capture_enabled();
         }
-        if (runtime->is_key_pressed(g_settings.hk_toggle_freeze))
+
+        if (g_settings.strategy == capture_strategy::exact_snapshot_pair)
+        {
+            if (hotkey_pressed(runtime, g_settings.hk_capture_before))
+                arm_snapshot_capture(state, snapshot_target::before);
+            if (hotkey_pressed(runtime, g_settings.hk_capture_after))
+                arm_snapshot_capture(state, snapshot_target::after);
+        }
+        else if (hotkey_pressed(runtime, g_settings.hk_toggle_freeze))
+        {
             set_freeze_requested(state, !(g_frozen || g_freeze_armed));
-        if (runtime->is_key_pressed(g_settings.hk_toggle_auto))
+        }
+
+        if (hotkey_pressed(runtime, g_settings.hk_toggle_auto))
             toggle_auto_sweep();
-        if (runtime->is_key_pressed(g_settings.hk_full_before))
+        if (hotkey_pressed(runtime, g_settings.hk_full_before))
         {
             g_auto_sweep_active = false;
             g_settings.split_position = full_before_position();
             mark_settings_dirty();
         }
-        if (runtime->is_key_pressed(g_settings.hk_full_after))
+        if (hotkey_pressed(runtime, g_settings.hk_full_after))
         {
             g_auto_sweep_active = false;
             g_settings.split_position = full_after_position();
             mark_settings_dirty();
         }
 
-        process_move_key(runtime, state->left_key, static_cast<uint32_t>(g_settings.hk_left), -1, dt, now);
-        process_move_key(runtime, state->right_key, static_cast<uint32_t>(g_settings.hk_right), 1, dt, now);
+        process_move_key(runtime, state->left_key, g_settings.hk_left, -1, dt, now);
+        process_move_key(runtime, state->right_key, g_settings.hk_right, 1, dt, now);
         update_auto_sweep(dt);
         update_screen_drag(runtime, state);
         maybe_save_settings();
@@ -1189,8 +1459,9 @@ namespace
 
     bool prepare_compositor(effect_runtime *runtime, runtime_state *state, command_list *cmd)
     {
-        if (state->labels_dirty)
-            rebuild_labels(runtime, state);
+        if (!state->pair_valid || !state->before.ready || !state->after.ready)
+            return false;
+
         if (state->composite == 0)
         {
             refresh_effect_handles(runtime, state);
@@ -1221,22 +1492,9 @@ namespace
             return false;
         }
 
-        // Preview-only mode may run before a valid Before/After pair exists. In that
-        // case bind the current post-effects snapshot to both image semantics; the
-        // shader uses it as a neutral full-screen base while both labels are shown.
-        const resource_view preview_base = state->after.srv;
-        const resource_view before_srv = state->before.ready ? state->before.srv : preview_base;
-        const resource_view after_srv = state->after.ready ? state->after.srv : before_srv;
-        if (before_srv == 0 || after_srv == 0)
-            return false;
-
-        runtime->update_texture_bindings("FRAMECOMPARE_BEFORE", before_srv, before_srv);
-        runtime->update_texture_bindings("FRAMECOMPARE_AFTER", after_srv, after_srv);
+        runtime->update_texture_bindings("FRAMECOMPARE_BEFORE", state->before.srv, state->before.srv);
+        runtime->update_texture_bindings("FRAMECOMPARE_AFTER", state->after.srv, state->after.srv);
         runtime->update_texture_bindings("FRAMECOMPARE_PARAMS", state->params.srv, state->params.srv);
-        if (state->before_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_BEFORE", state->before_label.srv, state->before_label.srv);
-        if (state->after_label.srv != 0)
-            runtime->update_texture_bindings("FRAMECOMPARE_LABEL_AFTER", state->after_label.srv, state->after_label.srv);
         return true;
     }
 
@@ -1246,7 +1504,6 @@ namespace
         state->last_tick = clock_type::now();
         {
             std::lock_guard lock(g_runtime_mutex);
-            g_runtime_by_swapchain[runtime->get_native()] = runtime;
             if (g_primary_runtime == nullptr)
                 g_primary_runtime = runtime;
         }
@@ -1259,7 +1516,6 @@ namespace
     {
         {
             std::lock_guard lock(g_runtime_mutex);
-            g_runtime_by_swapchain.erase(runtime->get_native());
             if (g_primary_runtime == runtime)
                 g_primary_runtime = nullptr;
         }
@@ -1270,8 +1526,6 @@ namespace
             device *dev = runtime->get_device();
             destroy_gpu_texture(dev, state->before);
             destroy_gpu_texture(dev, state->after);
-            destroy_label_texture(dev, state->before_label);
-            destroy_label_texture(dev, state->after_label);
             destroy_parameter_texture(dev, state->params);
             state->active_snapshot.reset();
             state->imported11.Reset();
@@ -1298,53 +1552,27 @@ namespace
         }
     }
 
-    void on_present(command_queue *queue, swapchain *swapchain, const rect *, const rect *, uint32_t, const rect *)
-    {
-        if (!g_settings.enabled || g_frozen || g_settings.capture != capture_mode::application_present)
-            return;
-
-        effect_runtime *runtime = nullptr;
-        {
-            std::lock_guard lock(g_runtime_mutex);
-            const auto it = g_runtime_by_swapchain.find(swapchain->get_native());
-            if (it != g_runtime_by_swapchain.end())
-                runtime = it->second;
-        }
-        if (!runtime)
-            return;
-        auto *state = runtime->get_private_data<runtime_state>();
-        if (!state)
-            return;
-
-        const resource backbuffer = runtime->get_current_back_buffer();
-        command_list *cmd = queue->get_immediate_command_list();
-        if (copy_into_capture(runtime, cmd, backbuffer, resource_usage::present, state->before, "FrameCompare Before (Present)"))
-        {
-            ++state->present_capture_generation;
-            state->before_width = state->before.width;
-            state->before_height = state->before.height;
-            state->capture_source = "Application Present hook backbuffer (ordering-dependent generic mode)";
-            state->capture_note.clear();
-        }
-    }
-
     void on_begin_effects(effect_runtime *runtime, command_list *cmd, resource_view rtv, resource_view)
     {
-        if (!g_settings.enabled || g_frozen)
-            return;
         auto *state = runtime->get_private_data<runtime_state>();
         if (!state)
+            return;
+
+        // The compositor is rendered explicitly at finish_effects only. Keep it out
+        // of the normal preset technique order.
+        if (state->composite != 0)
+            runtime->set_technique_state(state->composite, false);
+
+        if (g_settings.strategy != capture_strategy::live_pipeline || !g_settings.enabled || g_frozen ||
+            state->pending_snapshot != snapshot_target::none)
             return;
 
         ++state->effect_cycle;
         state->fallback_before_this_cycle = false;
         state->before_this_cycle = false;
 
-        if (state->composite != 0)
-            runtime->set_technique_state(state->composite, false);
-
-        // Auto mode intentionally keeps a guaranteed same-frame generic fallback. If a fresh
-        // Feature 18 snapshot exists by finish_effects, it overwrites this fallback before compositing.
+        // Live Auto keeps a same-frame pre-ReShade fallback. A fresh Feature 18
+        // snapshot may overwrite it in finish_effects.
         if (g_settings.capture == capture_mode::automatic || g_settings.capture == capture_mode::before_reshade_fx)
         {
             const resource target = runtime->get_device()->get_resource_from_view(rtv);
@@ -1360,26 +1588,20 @@ namespace
                 state->capture_note.clear();
             }
         }
-        else if (g_settings.capture == capture_mode::application_present &&
-                 state->present_capture_generation != state->last_present_used)
-        {
-            state->before_this_cycle = state->before.ready;
-            state->last_present_used = state->present_capture_generation;
-        }
     }
 
     void on_finish_effects(effect_runtime *runtime, command_list *cmd, resource_view rtv, resource_view rtv_srgb)
     {
-        const bool compare_enabled = g_settings.enabled;
-        const bool preview_enabled = g_settings.label_preview;
-        if (!compare_enabled && !preview_enabled)
-            return;
-
         auto *state = runtime->get_private_data<runtime_state>();
         if (!state)
             return;
 
-        if (compare_enabled && !g_frozen)
+        // Exact visible snapshots are taken later at reshade_present. Do not let an
+        // old comparison image contaminate the frame being captured.
+        if (state->pending_snapshot != snapshot_target::none)
+            return;
+
+        if (g_settings.strategy == capture_strategy::live_pipeline && g_settings.enabled && !g_frozen)
         {
             if (g_settings.capture == capture_mode::automatic || g_settings.capture == capture_mode::ngx_feature18)
             {
@@ -1395,11 +1617,6 @@ namespace
                 }
             }
 
-            if (g_settings.capture == capture_mode::application_present && !state->before_this_cycle)
-            {
-                state->capture_note = "No fresh Present-stage Before image was available for this ReShade effect cycle.";
-            }
-
             if (state->before_this_cycle)
             {
                 const resource target = runtime->get_device()->get_resource_from_view(rtv);
@@ -1407,7 +1624,7 @@ namespace
                 {
                     state->after_width = state->after.width;
                     state->after_height = state->after.height;
-                    state->pair_valid = state->before.ready && state->after.ready;
+                    update_pair_validity(state, false);
                     if (state->pair_valid && !state->logged_pair_ready)
                     {
                         const std::string dims = std::to_string(state->before_width) + "x" + std::to_string(state->before_height) +
@@ -1427,22 +1644,7 @@ namespace
             }
         }
 
-        const bool use_compare_pair = compare_enabled && state->pair_valid && state->before.ready && state->after.ready;
-
-        // Label placement preview is intentionally independent of the comparison
-        // capture. If no valid pair is being displayed, save the current final
-        // ReShade target as a neutral base so both labels can still be positioned
-        // live in-game. This copy exists only while preview mode is enabled.
-        if (preview_enabled && !use_compare_pair)
-        {
-            const resource target = runtime->get_device()->get_resource_from_view(rtv);
-            if (!copy_into_capture(runtime, cmd, target, resource_usage::render_target, state->after, "FrameCompare Label Preview Base"))
-                return;
-            state->after_width = state->after.width;
-            state->after_height = state->after.height;
-        }
-
-        if (!use_compare_pair && !preview_enabled)
+        if (!g_settings.enabled || !state->pair_valid || !state->before.ready || !state->after.ready)
             return;
         if (!prepare_compositor(runtime, state, cmd))
             return;
@@ -1482,10 +1684,160 @@ namespace
         }
     }
 
+    bool capture_pending_exact_snapshot(effect_runtime *runtime, runtime_state *state)
+    {
+        if (g_settings.strategy != capture_strategy::exact_snapshot_pair ||
+            state->pending_snapshot == snapshot_target::none || state->overlay_open)
+            return false;
+
+        command_queue *queue = runtime->get_command_queue();
+        command_list *cmd = queue != nullptr ? queue->get_immediate_command_list() : nullptr;
+        const resource backbuffer = runtime->get_current_back_buffer();
+        const snapshot_target target = state->pending_snapshot;
+        gpu_texture &dest = target == snapshot_target::before ? state->before : state->after;
+        const char *debug_name = target == snapshot_target::before
+            ? "FrameCompare Exact Before"
+            : "FrameCompare Exact After";
+
+        if (!copy_into_capture(runtime, cmd, backbuffer, resource_usage::present, dest, debug_name))
+        {
+            state->capture_note = "Exact visible snapshot copy failed; request remains armed for the next frame.";
+            return false;
+        }
+
+        if (target == snapshot_target::before)
+        {
+            state->exact_before_valid = true;
+            state->before_width = dest.width;
+            state->before_height = dest.height;
+            state->capture_source = "Exact visible Before snapshot";
+        }
+        else
+        {
+            state->exact_after_valid = true;
+            state->after_width = dest.width;
+            state->after_height = dest.height;
+            state->capture_source = "Exact visible After snapshot";
+        }
+
+        state->pending_snapshot = snapshot_target::none;
+        update_pair_validity(state, true);
+        if (state->pair_valid)
+            state->capture_note = "Exact snapshot pair ready. Divider motion does not re-render either side.";
+        else if (!(state->exact_before_valid && state->exact_after_valid))
+            state->capture_note = "Snapshot saved. Capture the other side to complete the exact pair.";
+
+        const std::string side = target == snapshot_target::before ? "Before" : "After";
+        fc_log(reshade::log::level::info,
+            "精确 " + side + " 截图已捕获。" + (state->pair_valid ? std::string(" Before/After 画面对已就绪。") : std::string()),
+            "Exact " + side + " snapshot captured." + (state->pair_valid ? std::string(" Before/After pair is ready.") : std::string()));
+        return true;
+    }
+
+    void draw_osd_text(const char *text, float anchor_x, float anchor_y)
+    {
+        if (text == nullptr || *text == '\0')
+            return;
+
+        const ImGuiIO &io = ImGui::GetIO();
+        const float margin = std::max(0.0f, g_settings.osd_margin_px);
+        ImFont *font = ImGui::GetFont();
+        ImGui::PushFont(font, static_cast<float>(g_settings.font_size_px));
+        const ImVec2 size = ImGui::CalcTextSize(text);
+
+        const float ax = std::clamp(anchor_x, 0.0f, 1.0f);
+        const float ay = std::clamp(anchor_y, 0.0f, 1.0f);
+        float x = margin + ax * std::max(0.0f, io.DisplaySize.x - margin * 2.0f);
+        float y = margin + ay * std::max(0.0f, io.DisplaySize.y - margin * 2.0f);
+        x -= ax * size.x;
+        y -= ay * size.y;
+        x = std::clamp(x, margin, std::max(margin, io.DisplaySize.x - margin - size.x));
+        y = std::clamp(y, margin, std::max(margin, io.DisplaySize.y - margin - size.y));
+
+        const float outline = std::max(0.0f, g_settings.outline_px);
+        const float alpha = std::clamp(g_settings.label_opacity, 0.0f, 1.0f);
+        if (outline > 0.0f)
+        {
+            const ImVec4 black(0.0f, 0.0f, 0.0f, alpha);
+            const ImVec2 offsets[] = {
+                { -outline, 0.0f }, { outline, 0.0f }, { 0.0f, -outline }, { 0.0f, outline },
+                { -outline, -outline }, { outline, -outline }, { -outline, outline }, { outline, outline }
+            };
+            for (const ImVec2 &d : offsets)
+            {
+                ImGui::SetCursorScreenPos(ImVec2(x + d.x, y + d.y));
+                ImGui::TextColored(black, "%s", text);
+            }
+        }
+
+        ImGui::SetCursorScreenPos(ImVec2(x, y));
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, alpha), "%s", text);
+        ImGui::PopFont();
+    }
+
+    void on_reshade_overlay(effect_runtime *runtime)
+    {
+        if (!is_primary_runtime(runtime))
+            return;
+        auto *state = runtime->get_private_data<runtime_state>();
+        if (!state)
+            return;
+
+        // Pending exact capture must see the game image, not FrameCompare's own OSD.
+        if (state->pending_snapshot != snapshot_target::none && !state->overlay_open)
+            return;
+
+        bool has_anything = false;
+        const bool show_pair_labels = g_settings.label_preview ||
+            (g_settings.show_labels && g_settings.enabled && state->pair_valid);
+        has_anything |= show_pair_labels;
+        for (const auto &item : g_settings.hud_indicators)
+            has_anything |= item.enabled;
+        if (!has_anything)
+            return;
+
+        const ImGuiIO &io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(0.0f);
+        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus;
+        if (!ImGui::Begin("##FrameCompareOSDv13", nullptr, flags))
+        {
+            ImGui::End();
+            return;
+        }
+
+        if (show_pair_labels)
+        {
+            draw_osd_text(g_settings.before_text.data(), g_settings.before_x, g_settings.before_y);
+            draw_osd_text(g_settings.after_text.data(), g_settings.after_x, g_settings.after_y);
+        }
+
+        const auto now = clock_type::now();
+        for (const auto &item : g_settings.hud_indicators)
+        {
+            if (!item.enabled || !item.runtime_initialized)
+                continue;
+            if (item.source == hud_state_source::hotkey_pulse && item.changed_at == clock_type::time_point::min())
+                continue;
+            if (item.show_seconds > 0.0f && std::chrono::duration<float>(now - item.changed_at).count() > item.show_seconds)
+                continue;
+            draw_osd_text(item.source == hud_state_source::hotkey_pulse
+                    ? item.text_on.data()
+                    : (item.runtime_on ? item.text_on.data() : item.text_off.data()),
+                item.x, item.y);
+        }
+
+        ImGui::End();
+    }
+
     void on_reshade_present(effect_runtime *runtime)
     {
         if (auto *state = runtime->get_private_data<runtime_state>())
         {
+            capture_pending_exact_snapshot(runtime, state);
             update_hotkeys(runtime, state);
             emit_runtime_log_diagnostics(state);
         }
@@ -1516,9 +1868,6 @@ namespace
         case capture_mode::before_reshade_fx:
             return tr("ReShade FX 前（推荐 Feeder / 效果链注入）",
                       "Before ReShade FX (recommended for Feeder/effect-chain injection)");
-        case capture_mode::application_present:
-            return tr("Application Present 钩子（通用 / 依赖顺序）",
-                      "Application Present hook (generic / ordering dependent)");
         }
         return tr("未知", "Unknown");
     }
@@ -1533,204 +1882,346 @@ namespace
         }
     }
 
+    const char *strategy_name(capture_strategy strategy)
+    {
+        switch (strategy)
+        {
+        case capture_strategy::exact_snapshot_pair: return tr("精确截图对", "Exact snapshot pair");
+        case capture_strategy::live_pipeline: return tr("实时处理链", "Live pipeline");
+        }
+        return tr("未知", "Unknown");
+    }
+
+    const char *hud_source_name(hud_state_source source)
+    {
+        switch (source)
+        {
+        case hud_state_source::hotkey_toggle: return tr("快捷键镜像开关", "Hotkey mirror toggle");
+        case hud_state_source::reshade_effects_state: return tr("ReShade 实际效果状态", "Actual ReShade effects state");
+        case hud_state_source::hotkey_hold: return tr("按住快捷键", "Hotkey hold");
+        }
+        return tr("未知", "Unknown");
+    }
+
     void draw_settings(effect_runtime *runtime)
     {
+        if (!is_primary_runtime(runtime))
+            return;
         auto *state = runtime->get_private_data<runtime_state>();
         if (!state)
             return;
 
         bool changed = false;
-        bool labels_changed = false;
 
-        int language = static_cast<int>(g_settings.language);
         const char *language_items[] = { "中文", "English" };
-        if (ImGui::Combo("界面语言 / UI Language##FrameCompareLanguage", &language, language_items, IM_ARRAYSIZE(language_items)))
+        int language = static_cast<int>(g_settings.language);
+        ImGui::SetNextItemWidth(150.0f);
+        if (ImGui::Combo(tr("界面语言##Language", "UI language##Language"), &language, language_items, 2))
         {
             g_settings.language = static_cast<ui_language>(language);
             changed = true;
-            fc_log(reshade::log::level::info,
-                "界面语言已切换为中文。",
-                "UI language changed to English.");
         }
 
-        ImGui::TextDisabled("FrameCompare v1.2.0 | %s: %s | %s: %s",
-            tr("插件状态", "Add-on"), tr("已加载", "loaded"),
-            tr("画面对", "Pair"), state->pair_valid ? tr("已就绪", "ready") : tr("等待捕获", "waiting"));
+        ImGui::TextDisabled("FrameCompare v1.3.0");
+        ImGui::SameLine();
+        ImGui::TextDisabled("| %s", strategy_name(g_settings.strategy));
+        ImGui::Separator();
 
-        if (state->composite == 0)
+        if (ImGui::CollapsingHeader(tr("快速流程 / 使用说明##QuickStart", "Quick workflow / usage##QuickStart"), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.35f, 0.25f, 1.0f));
+            const std::string capture_before_key = hotkey_description(g_settings.hk_capture_before);
+            const std::string capture_after_key = hotkey_description(g_settings.hk_capture_after);
+            const std::string compare_key = hotkey_description(g_settings.hk_toggle_compare);
+            const std::string sweep_key = hotkey_description(g_settings.hk_toggle_auto);
+            ImGui::TextWrapped(tr(
+                "推荐录制流程：选择“精确截图对” → 把游戏/插件切到真正 OFF → [%s] 捕获 Before → 切到完整增强 ON → [%s] 捕获 After → [%s] 开启对比 → 使用移动快捷键、[%s] 自动扫屏或鼠标拖动分割线。捕获请求会等到 ReShade 设置面板关闭后再抓下一帧，避免把 FrameCompare 自己的界面录进去。",
+                "Recommended workflow: Exact snapshot pair -> switch the game/plugins to the real OFF state -> [%s] captures Before -> switch to full enhanced ON -> [%s] captures After -> [%s] enables comparison -> use move hotkeys, [%s] auto sweep, or mouse drag. Capture requests wait until the ReShade settings overlay is closed before grabbing the next frame, so FrameCompare's own UI is not captured."),
+                capture_before_key.c_str(), capture_after_key.c_str(), compare_key.c_str(), sweep_key.c_str());
             ImGui::TextWrapped("%s", tr(
-                "错误：未找到 FrameCompare.fx。插件本体已加载，但无法显示对比画面。请把 FrameCompare.fx 放到 reshade-shaders\\Shaders\\，然后在 ReShade 中重新加载效果或重启游戏。",
-                "ERROR: FrameCompare.fx is missing. The add-on loaded, but comparison rendering cannot work. Put FrameCompare.fx in reshade-shaders\\Shaders\\, then reload effects or restart the game."));
-            ImGui::PopStyleColor();
-        }
-        else
-        {
-            ImGui::TextDisabled("%s", tr("合成着色器：已就绪", "Composite shader: ready"));
-        }
-
-        if (ImGui::CollapsingHeader(tr("快速教程 / 使用说明##QuickStart", "Quick start / How to use##QuickStart"), ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::TextWrapped("%s", tr(
-                "1. 安装：00-FrameCompare.addon64 放在 ReShade Add-on 目录；FrameCompare.fx 必须放在 reshade-shaders\\Shaders\\。",
-                "1. Install: place 00-FrameCompare.addon64 in the ReShade add-on directory; FrameCompare.fx must be in reshade-shaders\\Shaders\\."));
-            ImGui::TextWrapped("%s", tr(
-                "2. 捕获模式：RenoDX / 插件方式 DLSS5 先用“自动”；Feeder / ReShade 效果链方式用“ReShade FX 前”。",
-                "2. Capture mode: for RenoDX/native DLSS5 start with Auto; for Feeder/ReShade effect-chain injection use Before ReShade FX."));
-            ImGui::TextWrapped("%s", tr(
-                "3. F9 开关对比；F10 冻结/解除冻结当前 Before+After；F11 自动扫屏；左右方向键移动分割线；Home/End 显示完整 Before/After。",
-                "3. F9 toggles comparison; F10 freezes/unfreezes the current Before+After pair; F11 auto-sweeps; Left/Right move the divider; Home/End show full Before/After."));
-            ImGui::TextWrapped("%s", tr(
-                "4. 调文字：展开“文字标签”，开启“文字位置调试预览”，调整 OFF/ON 的 X/Y、字号、描边；录制前关闭预览。",
-                "4. Labels: open Labels, enable placement preview, tune OFF/ON X/Y, size and outline, then disable preview before recording."));
-            ImGui::TextWrapped("%s", tr(
-                "5. 判断是否正常：展开“诊断与日志”，至少应看到 FrameCompare.fx=已就绪、参数上传=已就绪；开始对比后 Pair 应为已就绪。错误会写入 ReShade.log。",
-                "5. Verify: in Diagnostics & Logging, FrameCompare.fx and parameter upload should be ready; after comparison starts, Pair should become ready. Errors are written to ReShade.log."));
-            ImGui::TextWrapped("%s", tr(
-                "6. 日志：在 ReShade.log 搜索 [FrameCompare]。正常至少会看到“初始化完成”和“合成着色器已就绪”；错误/警告不会再逐帧刷屏。",
-                "6. Log: search ReShade.log for [FrameCompare]. A healthy setup should show initialization and compositor-ready messages; errors/warnings are rate-limited and do not spam every frame."));
+                "精确截图对是真正的两张可见画面，适合静态机位和录制扫屏。实时处理链用于动态画面，但 Before 是否等于绝对原版取决于 DLSS/RenoDX/游戏的注入位置。",
+                "Exact snapshot pair stores two actually visible frames and is intended for static-shot recording. Live pipeline is for moving scenes, but whether Before is absolute vanilla depends on the game's DLSS/RenoDX injection point."));
         }
 
-        if (ImGui::CollapsingHeader(tr("基础设置##Basic", "Basic settings##Basic")))
+        if (ImGui::CollapsingHeader(tr("对比与捕获##Compare", "Comparison & capture##Compare"), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            if (ImGui::Checkbox(tr("启用对比##EnableCompare", "Enable comparison##EnableCompare"), &g_settings.enabled))
+            if (ImGui::Checkbox(tr("启用对比画面##Enabled", "Enable comparison image##Enabled"), &g_settings.enabled))
             {
-                changed = true;
-                state->pair_valid = false;
-                state->before_this_cycle = false;
-                state->fallback_before_this_cycle = false;
                 if (!g_settings.enabled)
                 {
+                    g_auto_sweep_active = false;
                     g_frozen = false;
                     g_freeze_armed = false;
-                    g_auto_sweep_active = false;
                 }
-                sync_ngx_capture_enabled();
-                if (g_settings.verbose_logging)
-                    fc_log(reshade::log::level::info,
-                        g_settings.enabled ? "对比已启用。" : "对比已关闭。",
-                        g_settings.enabled ? "Comparison enabled." : "Comparison disabled.");
-            }
-
-            bool freeze_ui = g_frozen || g_freeze_armed;
-            if (ImGui::Checkbox(tr("冻结 Before + After 画面##FreezePair", "Freeze Before + After pair##FreezePair"), &freeze_ui))
-            {
-                set_freeze_requested(state, freeze_ui);
-                if (g_settings.verbose_logging)
-                    fc_log(reshade::log::level::info,
-                        freeze_ui ? "已请求冻结 Before + After。" : "已解除冻结。",
-                        freeze_ui ? "Freeze requested for Before + After." : "Freeze disabled.");
-            }
-            if (g_freeze_armed)
-                ImGui::TextDisabled("%s", tr("等待下一组有效 Before/After 后冻结。", "Freeze is armed and will lock on the next valid Before/After pair."));
-
-            int capture = static_cast<int>(g_settings.capture);
-            const char *capture_items_zh[] = {
-                "自动：NGX Feature 18 -> ReShade FX 前回退",
-                "严格 NGX Feature 18",
-                "ReShade FX 前",
-                "Application Present 钩子"
-            };
-            const char *capture_items_en[] = {
-                "Auto: NGX Feature 18 -> Before ReShade FX fallback",
-                "NGX Feature 18 strict",
-                "Before ReShade FX",
-                "Application Present hook"
-            };
-            const char *const *capture_items = g_settings.language == ui_language::chinese ? capture_items_zh : capture_items_en;
-            if (ImGui::Combo(tr("Before 捕获模式##CaptureMode", "Before capture mode##CaptureMode"), &capture, capture_items, 4))
-            {
-                g_settings.capture = static_cast<capture_mode>(capture);
                 changed = true;
-                state->pair_valid = false;
                 sync_ngx_capture_enabled();
             }
-            ImGui::TextWrapped("%s", tr(
-                "RenoDX / 原生 Neural Rendering 建议先用自动模式。DLSS5 Feeder 或运行在 ReShade 效果链中的效果，使用“ReShade FX 前”。严格 NGX 不会回退到其他捕获阶段。",
-                "For RenoDX/native Neural Rendering, try Auto first. For DLSS5 Feeder or effects inside the ReShade chain, use Before ReShade FX. Strict NGX never falls back to another stage."));
 
-            changed |= ImGui::Checkbox(tr("Before 画面放左侧##BeforeOnLeft", "Before image on left##BeforeOnLeft"), &g_settings.before_on_left);
+            const char *strategy_zh[] = { "精确截图对（推荐录制）", "实时处理链（高级）" };
+            const char *strategy_en[] = { "Exact snapshot pair (recommended for recording)", "Live pipeline (advanced)" };
+            int strategy = static_cast<int>(g_settings.strategy);
+            if (ImGui::Combo(tr("工作模式##Strategy", "Workflow##Strategy"), &strategy,
+                    g_settings.language == ui_language::chinese ? strategy_zh : strategy_en, 2))
+            {
+                g_settings.strategy = static_cast<capture_strategy>(strategy);
+                state->pair_valid = false;
+                state->exact_before_valid = false;
+                state->exact_after_valid = false;
+                state->pending_snapshot = snapshot_target::none;
+                state->logged_pair_ready = false;
+                state->warned_incompatible_pair = false;
+                g_frozen = false;
+                g_freeze_armed = false;
+                g_auto_sweep_active = false;
+                changed = true;
+                sync_ngx_capture_enabled();
+            }
+
+            if (g_settings.strategy == capture_strategy::exact_snapshot_pair)
+            {
+                ImGui::TextWrapped("%s", tr(
+                    "Before / After 由你实际切换 OFF/ON 后分别捕获。插件不会假装同一动态帧能同时拥有所有第三方插件的“真正原版”和“最终增强”状态。",
+                    "Capture Before and After after you actually switch the enhancement stack OFF/ON. The add-on does not pretend that every third-party injection can provide true vanilla and final-enhanced images from the same moving frame."));
+
+                if (ImGui::Button(tr("捕获 Before##CaptureBefore", "Capture Before##CaptureBefore")))
+                    arm_snapshot_capture(state, snapshot_target::before);
+                ImGui::SameLine();
+                ImGui::TextDisabled("[%s]", hotkey_description(g_settings.hk_capture_before).c_str());
+                ImGui::SameLine();
+                if (ImGui::Button(tr("捕获 After##CaptureAfter", "Capture After##CaptureAfter")))
+                    arm_snapshot_capture(state, snapshot_target::after);
+                ImGui::SameLine();
+                ImGui::TextDisabled("[%s]", hotkey_description(g_settings.hk_capture_after).c_str());
+                ImGui::SameLine();
+                if (ImGui::Button(tr("清空截图对##ClearPair", "Clear pair##ClearPair")))
+                {
+                    state->pair_valid = false;
+                    state->exact_before_valid = false;
+                    state->exact_after_valid = false;
+                    state->pending_snapshot = snapshot_target::none;
+                    state->before.ready = false;
+                    state->after.ready = false;
+                    state->logged_pair_ready = false;
+                    state->warned_incompatible_pair = false;
+                    state->capture_source = "None";
+                    state->capture_note.clear();
+                }
+
+                ImGui::Text("Before: %s | After: %s | %s: %s",
+                    state->exact_before_valid ? tr("已捕获", "captured") : tr("未捕获", "not captured"),
+                    state->exact_after_valid ? tr("已捕获", "captured") : tr("未捕获", "not captured"),
+                    tr("画面对", "Pair"), state->pair_valid ? tr("已就绪", "ready") : tr("未就绪", "not ready"));
+                if (state->pending_snapshot != snapshot_target::none)
+                    ImGui::TextDisabled("%s", tr("捕获已准备：关闭 ReShade 面板后会自动抓取下一帧。", "Capture armed: close the ReShade overlay and the next frame will be grabbed automatically."));
+            }
+            else
+            {
+                const char *capture_zh[] = {
+                    "自动：优先 NGX Feature 18，失败回退到 ReShade FX 前",
+                    "严格 NGX Feature 18",
+                    "ReShade FX 前"
+                };
+                const char *capture_en[] = {
+                    "Auto: prefer NGX Feature 18, fallback to pre-ReShade FX",
+                    "Strict NGX Feature 18",
+                    "Before ReShade FX"
+                };
+                int capture = static_cast<int>(g_settings.capture);
+                if (ImGui::Combo(tr("实时 Before 来源##LiveCapture", "Live Before source##LiveCapture"), &capture,
+                        g_settings.language == ui_language::chinese ? capture_zh : capture_en, 3))
+                {
+                    g_settings.capture = static_cast<capture_mode>(capture);
+                    state->pair_valid = false;
+                    state->logged_pair_ready = false;
+                    state->warned_incompatible_pair = false;
+                    changed = true;
+                    sync_ngx_capture_enabled();
+                }
+                ImGui::TextWrapped("%s", tr(
+                    "这里仅决定实时模式从处理链哪个阶段取 Before。它不再作为主界面的四个难懂“捕获模式”暴露；Application Present 模式已移除。",
+                    "This only selects where Live mode gets its Before image. The old four-way capture-mode UI is gone, and Application Present mode has been removed."));
+
+                bool freeze_value = g_frozen || g_freeze_armed;
+                if (ImGui::Checkbox(tr("冻结当前实时画面对##Freeze", "Freeze current live pair##Freeze"), &freeze_value))
+                    set_freeze_requested(state, freeze_value);
+                if (g_freeze_armed)
+                    ImGui::SameLine(), ImGui::TextDisabled("%s", tr("等待首个有效画面对", "waiting for first valid pair"));
+            }
+
+            changed |= ImGui::Checkbox(tr("Before 在左侧##BeforeLeft", "Before on left##BeforeLeft"), &g_settings.before_on_left);
+
+            const char *display_zh[] = { "普通同坐标擦除（备用）", "SplitScreenCR 分屏（推荐）" };
+            const char *display_en[] = { "Normal same-coordinate wipe (fallback)", "SplitScreenCR split (recommended)" };
             int display = static_cast<int>(g_settings.display);
-            const char *display_items_zh[] = { "普通擦除（两边保持完整画面坐标）", "SplitScreenCR 风格中央重映射" };
-            const char *display_items_en[] = { "Normal wipe (same full-frame coordinates)", "SplitScreenCR-style centered remap" };
-            const char *const *display_items = g_settings.language == ui_language::chinese ? display_items_zh : display_items_en;
-            if (ImGui::Combo(tr("显示模式##DisplayMode", "Display mode##DisplayMode"), &display, display_items, 2))
+            if (ImGui::Combo(tr("显示方式##Display", "Display mode##Display"), &display,
+                    g_settings.language == ui_language::chinese ? display_zh : display_en, 2))
             {
                 g_settings.display = static_cast<display_mode>(display);
                 changed = true;
             }
         }
 
-        if (ImGui::CollapsingHeader(tr("分割线与动画##Divider", "Divider & animation##Divider")))
+        if (ImGui::CollapsingHeader(tr("分割线与动画##Divider", "Divider & animation##Divider"), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            if (ImGui::SliderFloat(tr("分割位置##DividerPosition", "Divider position##DividerPosition"), &g_settings.split_position, 0.0f, 1.0f, "%.3f"))
+            changed |= ImGui::SliderFloat(tr("分割位置##Position", "Split position##Position"), &g_settings.split_position, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::Checkbox(tr("显示分割线##ShowBorder", "Show divider##ShowBorder"), &g_settings.show_border);
+            changed |= ImGui::SliderFloat(tr("分割线宽度##BorderWidth", "Divider width##BorderWidth"), &g_settings.border_width, 0.0f, 0.02f, "%.4f");
+            changed |= ImGui::SliderFloat(tr("分割线透明度##BorderOpacity", "Divider opacity##BorderOpacity"), &g_settings.border_opacity, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat(tr("短按移动步长##MoveStep", "Short-press step##MoveStep"), &g_settings.move_step, 0.001f, 0.20f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("长按启动延迟（秒）##HoldDelay", "Hold delay (seconds)##HoldDelay"), &g_settings.hold_delay, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat(tr("长按移动速度（屏/秒）##MoveSpeed", "Hold move speed (screen/sec)##MoveSpeed"), &g_settings.move_speed, 0.01f, 2.0f, "%.2f");
+
+            ImGui::SeparatorText(tr("自动扫屏", "Auto sweep"));
+            if (ImGui::Button(g_auto_sweep_active ? tr("停止自动扫屏##Sweep", "Stop auto sweep##Sweep") : tr("启动自动扫屏##Sweep", "Start auto sweep##Sweep")))
+                toggle_auto_sweep();
+            ImGui::SameLine();
+            ImGui::TextDisabled("[%s]", hotkey_description(g_settings.hk_toggle_auto).c_str());
+            changed |= ImGui::SliderFloat(tr("扫屏速度（屏/秒）##SweepSpeed", "Sweep speed (screen/sec)##SweepSpeed"), &g_settings.auto_sweep_speed, 0.01f, 2.0f, "%.2f");
+            changed |= ImGui::Checkbox(tr("到边界后往返##PingPong", "Ping-pong at edges##PingPong"), &g_settings.auto_sweep_pingpong);
+            changed |= ImGui::Checkbox(tr("启动时从 Before 全屏开始##ResetBefore", "Start from full Before##ResetBefore"), &g_settings.auto_reset_from_before);
+            int direction = g_settings.auto_sweep_direction;
+            const char *dirs_zh[] = { "向左", "向右" };
+            const char *dirs_en[] = { "Left", "Right" };
+            int dir_index = direction < 0 ? 0 : 1;
+            if (ImGui::Combo(tr("非重置时初始方向##SweepDirection", "Initial direction when not resetting##SweepDirection"), &dir_index,
+                    g_settings.language == ui_language::chinese ? dirs_zh : dirs_en, 2))
             {
-                g_auto_sweep_active = false;
+                g_settings.auto_sweep_direction = dir_index == 0 ? -1 : 1;
                 changed = true;
             }
-            changed |= ImGui::SliderFloat(tr("短按移动步长##MoveStep", "Short press step##MoveStep"), &g_settings.move_step, 0.001f, 0.20f, "%.3f");
-            changed |= ImGui::SliderFloat(tr("长按触发延迟（秒）##HoldDelay", "Hold delay (s)##HoldDelay"), &g_settings.hold_delay, 0.0f, 1.0f, "%.2f");
-            changed |= ImGui::SliderFloat(tr("长按移动速度（屏/秒）##MoveSpeed", "Hold movement speed (screen/s)##MoveSpeed"), &g_settings.move_speed, 0.01f, 2.0f, "%.2f");
 
-            if (ImGui::Checkbox(tr("自动扫屏##AutoSweep", "Auto sweep active##AutoSweep"), &g_auto_sweep_active))
-            {
-                if (g_auto_sweep_active)
-                    start_auto_sweep();
-            }
-            changed |= ImGui::SliderFloat(tr("自动扫屏速度##AutoSweepSpeed", "Auto sweep speed##AutoSweepSpeed"), &g_settings.auto_sweep_speed, 0.01f, 2.0f, "%.2f");
-            changed |= ImGui::Checkbox(tr("自动往返##PingPong", "Auto sweep ping-pong##PingPong"), &g_settings.auto_sweep_pingpong);
-            changed |= ImGui::Checkbox(tr("自动扫屏从完整 Before 开始##AutoReset", "Auto sweep starts from full Before##AutoReset"), &g_settings.auto_reset_from_before);
-            if (!g_settings.auto_reset_from_before)
-            {
-                int dir = g_settings.auto_sweep_direction;
-                if (ImGui::RadioButton(tr("物理方向：左 -> 右##DirRight", "Physical direction: left -> right##DirRight"), dir > 0)) { g_settings.auto_sweep_direction = 1; changed = true; }
-                ImGui::SameLine();
-                if (ImGui::RadioButton(tr("右 -> 左##DirLeft", "right -> left##DirLeft"), dir < 0)) { g_settings.auto_sweep_direction = -1; changed = true; }
-            }
-
-            changed |= ImGui::Checkbox(tr("显示分割线##ShowDivider", "Show divider##ShowDivider"), &g_settings.show_border);
-            changed |= ImGui::SliderFloat(tr("分割线宽度##DividerWidth", "Divider width##DividerWidth"), &g_settings.border_width, 0.0f, 0.02f, "%.4f");
-            changed |= ImGui::SliderFloat(tr("分割线透明度##DividerOpacity", "Divider opacity##DividerOpacity"), &g_settings.border_opacity, 0.0f, 1.0f, "%.2f");
-            changed |= ImGui::Checkbox(tr("ReShade 面板打开时允许鼠标拖动分割线##ScreenDrag", "Drag divider while ReShade overlay is open##ScreenDrag"), &g_settings.screen_drag);
-            changed |= ImGui::SliderFloat(tr("拖动抓取范围（px）##DragGrab", "Drag grab radius (px)##DragGrab"), &g_settings.drag_grab_px, 2.0f, 60.0f, "%.0f");
+            ImGui::SeparatorText(tr("鼠标拖动", "Mouse drag"));
+            changed |= ImGui::Checkbox(tr("ReShade 面板打开时允许拖动分割线##ScreenDrag", "Allow divider drag while ReShade overlay is open##ScreenDrag"), &g_settings.screen_drag);
+            changed |= ImGui::SliderFloat(tr("拖动捕获宽度（px）##DragGrab", "Drag grab width (px)##DragGrab"), &g_settings.drag_grab_px, 2.0f, 50.0f, "%.0f px");
         }
 
-        if (ImGui::CollapsingHeader(tr("文字标签##Labels", "Labels##Labels")))
+        if (ImGui::CollapsingHeader(tr("文字标签##Labels", "Labels##Labels"), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            changed |= ImGui::Checkbox(tr("显示 OFF / ON 文字##ShowLabels", "Show labels##ShowLabels"), &g_settings.show_labels);
-            changed |= ImGui::Checkbox(tr("文字位置调试预览（始终显示两边）##LabelPreview", "Label placement preview (always show both)##LabelPreview"), &g_settings.label_preview);
+            changed |= ImGui::Checkbox(tr("显示 Before / After 标签##ShowLabels", "Show Before / After labels##ShowLabels"), &g_settings.show_labels);
+            changed |= ImGui::Checkbox(tr("位置预览（没有画面对也显示）##PreviewLabels", "Position preview (show without pair)##PreviewLabels"), &g_settings.label_preview);
+            changed |= ImGui::InputText(tr("Before 文字##BeforeText", "Before text##BeforeText"), g_settings.before_text.data(), g_settings.before_text.size());
+            changed |= ImGui::InputText(tr("After 文字##AfterText", "After text##AfterText"), g_settings.after_text.data(), g_settings.after_text.size());
+            changed |= ImGui::SliderFloat(tr("Before X##BeforeX", "Before X##BeforeX"), &g_settings.before_x, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("Before Y##BeforeY", "Before Y##BeforeY"), &g_settings.before_y, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("After X##AfterX", "After X##AfterX"), &g_settings.after_x, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("After Y##AfterY", "After Y##AfterY"), &g_settings.after_y, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderInt(tr("全局字体大小##FontSize", "Global font size##FontSize"), &g_settings.font_size_px, 12, 128);
+            changed |= ImGui::SliderFloat(tr("全局文字透明度##LabelOpacity", "Global text opacity##LabelOpacity"), &g_settings.label_opacity, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat(tr("全局描边##Outline", "Global outline##Outline"), &g_settings.outline_px, 0.0f, 8.0f, "%.1f px");
+            changed |= ImGui::SliderFloat(tr("屏幕安全边距##Margin", "Screen safe margin##Margin"), &g_settings.osd_margin_px, 0.0f, 100.0f, "%.0f px");
             ImGui::TextWrapped("%s", tr(
-                "调试预览开启后，即使 Before/After 还没有捕获成功，也会持续显示两个标签，方便实时调整 X/Y、字号和描边。正式录制前建议关闭。",
-                "Preview keeps both labels visible even before a valid Before/After pair exists, so X/Y, size and outline can be tuned live. Disable it before normal recording."));
-            if (ImGui::InputText(tr("Before 标签文字##BeforeLabel", "Before label##BeforeLabel"), g_settings.before_text.data(), g_settings.before_text.size())) { labels_changed = changed = true; }
-            if (ImGui::InputText(tr("After 标签文字##AfterLabel", "After label##AfterLabel"), g_settings.after_text.data(), g_settings.after_text.size())) { labels_changed = changed = true; }
-            if (ImGui::InputText(tr("Windows 字体##FontName", "Windows font##FontName"), g_settings.font_name.data(), g_settings.font_name.size())) { labels_changed = changed = true; }
-            changed |= ImGui::SliderFloat(tr("Before 文字 X##BeforeX", "Before label X##BeforeX"), &g_settings.before_x, 0.0f, 1.0f, "%.3f");
-            changed |= ImGui::SliderFloat(tr("Before 文字 Y##BeforeY", "Before label Y##BeforeY"), &g_settings.before_y, 0.0f, 1.0f, "%.3f");
-            changed |= ImGui::SliderFloat(tr("After 文字 X##AfterX", "After label X##AfterX"), &g_settings.after_x, 0.0f, 1.0f, "%.3f");
-            changed |= ImGui::SliderFloat(tr("After 文字 Y##AfterY", "After label Y##AfterY"), &g_settings.after_y, 0.0f, 1.0f, "%.3f");
-            if (ImGui::SliderInt(tr("文字字号##FontSize", "Label font size##FontSize"), &g_settings.font_size_px, 8, 160)) { labels_changed = changed = true; }
-            changed |= ImGui::SliderFloat(tr("文字透明度##LabelOpacity", "Label opacity##LabelOpacity"), &g_settings.label_opacity, 0.0f, 1.0f, "%.2f");
-            changed |= ImGui::SliderFloat(tr("黑色描边##Outline", "Label outline##Outline"), &g_settings.outline_px, 0.0f, 8.0f, "%.1f px");
-            ImGui::TextDisabled("%s", tr("中文标签建议字体：Microsoft YaHei UI。", "For Chinese labels use a Windows font containing CJK glyphs, e.g. Microsoft YaHei UI."));
+                "v1.3 不再用 GDI 先生成文字纹理，而是直接在 ReShade 的 ImGui OSD 中绘字，并按完整文字尺寸限制到屏幕安全区，因此 ON/OFF 顶部和底部不会再被旧纹理边界裁掉。X/Y 是锚点：0=左/上，1=右/下。",
+                "v1.3 no longer rasterizes labels into GDI textures. Text is drawn in ReShade's ImGui OSD and clamped by its full measured size, preventing the old top/bottom glyph clipping. X/Y are anchors: 0=left/top, 1=right/bottom."));
         }
 
-        if (ImGui::CollapsingHeader(tr("快捷键##Hotkeys", "Hotkeys##Hotkeys")))
+        if (ImGui::CollapsingHeader(tr("自定义 HUD##HUD", "Custom HUD##HUD"), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::TextWrapped("%s", tr("下面填写的是 Windows Virtual-Key 数值。默认值通常不需要修改。", "Values are Windows virtual-key codes. Defaults normally do not need changes."));
-            changed |= ImGui::InputInt(tr("开关对比##HKCompare", "Toggle comparison##HKCompare"), &g_settings.hk_toggle_compare);
-            changed |= ImGui::InputInt(tr("冻结/解除冻结##HKFreeze", "Toggle freeze##HKFreeze"), &g_settings.hk_toggle_freeze);
-            changed |= ImGui::InputInt(tr("开关自动扫屏##HKAuto", "Toggle auto sweep##HKAuto"), &g_settings.hk_toggle_auto);
-            changed |= ImGui::InputInt(tr("分割线向左##HKLeft", "Move divider left##HKLeft"), &g_settings.hk_left);
-            changed |= ImGui::InputInt(tr("分割线向右##HKRight", "Move divider right##HKRight"), &g_settings.hk_right);
-            changed |= ImGui::InputInt(tr("完整显示 Before##HKBefore", "Show full Before##HKBefore"), &g_settings.hk_full_before);
-            changed |= ImGui::InputInt(tr("完整显示 After##HKAfter", "Show full After##HKAfter"), &g_settings.hk_full_after);
-            ImGui::TextDisabled("F9=120, F10=121, F11=122, Left=37, Right=39, Home=36, End=35");
+            ImGui::TextWrapped("%s", tr(
+                "可像 ShaderToggler 一样添加多个状态文字。所有条目共用上面的字体大小、透明度和描边，只单独保存文字、状态来源、快捷键、位置和显示时间。",
+                "Add multiple state labels similar to ShaderToggler. All entries share the global font size, opacity and outline above; each entry only stores its text, source, hotkey, position and display duration."));
+            if (ImGui::Button(tr("新增 HUD 条目##AddHUD", "Add HUD item##AddHUD")) && g_settings.hud_indicators.size() < 32)
+            {
+                hud_indicator item;
+                item.x = 0.50f;
+                item.y = 0.12f + 0.05f * static_cast<float>(g_settings.hud_indicators.size() % 10);
+                g_settings.hud_indicators.push_back(item);
+                changed = true;
+            }
+
+            for (size_t i = 0; i < g_settings.hud_indicators.size(); )
+            {
+                auto &item = g_settings.hud_indicators[i];
+                ImGui::PushID(static_cast<int>(i));
+                std::string title = std::string(item.name.data()) + "##HudNode";
+                const bool open = ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(tr("删除##DeleteHUD", "Delete##DeleteHUD")))
+                {
+                    if (g_hotkey_capture_id >= 1000 && g_hotkey_capture_id < 1100)
+                        cancel_hotkey_capture();
+                    g_settings.hud_indicators.erase(g_settings.hud_indicators.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    continue;
+                }
+                if (open)
+                {
+                    const bool was_enabled = item.enabled;
+                    if (ImGui::Checkbox(tr("启用##HUDEnabled", "Enabled##HUDEnabled"), &item.enabled))
+                    {
+                        if (item.enabled && !was_enabled)
+                            item.runtime_initialized = false;
+                        changed = true;
+                    }
+                    changed |= ImGui::InputText(tr("名称##HUDName", "Name##HUDName"), item.name.data(), item.name.size());
+                    const char *source_zh[] = { "快捷键切换状态", "ReShade 实际效果状态", "按住快捷键", "快捷键单次提示" };
+                    const char *source_en[] = { "Hotkey toggle state", "Actual ReShade effects state", "Hotkey hold", "Hotkey one-shot message" };
+                    int source = static_cast<int>(item.source);
+                    if (ImGui::Combo(tr("状态来源##HUDSource", "State source##HUDSource"), &source,
+                            g_settings.language == ui_language::chinese ? source_zh : source_en, 4))
+                    {
+                        item.source = static_cast<hud_state_source>(source);
+                        item.runtime_initialized = false;
+                        changed = true;
+                    }
+
+                    if (item.source != hud_state_source::reshade_effects_state)
+                        changed |= draw_hotkey_row(runtime, tr("快捷键", "Hotkey"), 1000 + static_cast<int>(i), item.key);
+                    else
+                        ImGui::TextDisabled("%s", tr("直接读取 ReShade 当前 Effects State，不需要重复绑定 END。", "Reads ReShade's current Effects State directly; no duplicate END binding is required."));
+
+                    if (item.source == hud_state_source::hotkey_pulse)
+                    {
+                        changed |= ImGui::InputText(tr("触发文字##HUDOn", "Message text##HUDOn"), item.text_on.data(), item.text_on.size());
+                        ImGui::TextDisabled("%s", tr("每次按快捷键都会重新开始显示计时。", "Every shortcut press restarts the display timer."));
+                    }
+                    else
+                    {
+                        changed |= ImGui::InputText(tr("ON 文字##HUDOn", "ON text##HUDOn"), item.text_on.data(), item.text_on.size());
+                        changed |= ImGui::InputText(tr("OFF 文字##HUDOff", "OFF text##HUDOff"), item.text_off.data(), item.text_off.size());
+                    }
+                    if (item.source == hud_state_source::hotkey_toggle)
+                        changed |= ImGui::Checkbox(tr("初始状态为 ON##HUDInitial", "Initial state ON##HUDInitial"), &item.initial_on);
+                    changed |= ImGui::SliderFloat(tr("X##HUDX", "X##HUDX"), &item.x, 0.0f, 1.0f, "%.3f");
+                    changed |= ImGui::SliderFloat(tr("Y##HUDY", "Y##HUDY"), &item.y, 0.0f, 1.0f, "%.3f");
+                    changed |= ImGui::SliderFloat(tr("状态变化后显示秒数（0=常驻）##HUDSeconds", "Seconds after state change (0=persistent)##HUDSeconds"), &item.show_seconds, 0.0f, 10.0f, "%.1f s");
+                    if (item.source == hud_state_source::hotkey_pulse)
+                        ImGui::TextDisabled("%s", item.runtime_initialized ? tr("状态：等待快捷键触发", "State: waiting for shortcut") : tr("状态：等待初始化", "State: not initialized"));
+                    else
+                        ImGui::TextDisabled("%s: %s", tr("当前状态", "Current state"), item.runtime_initialized ? (item.runtime_on ? "ON" : "OFF") : tr("等待初始化", "not initialized"));
+                    ImGui::TreePop();
+                }
+                ImGui::PopID();
+                ++i;
+            }
         }
 
-        if (ImGui::CollapsingHeader(tr("DLSS5 / NGX 捕获高级设置##NGX", "DLSS5 / NGX advanced capture##NGX")))
+        if (ImGui::CollapsingHeader(tr("快捷键##Hotkeys", "Hotkeys##Hotkeys"), ImGuiTreeNodeFlags_DefaultOpen))
         {
+            ImGui::TextWrapped("%s", tr(
+                "点击快捷键框后直接按键或组合键，再点“确定”。不需要输入 Windows VK 数字。",
+                "Click a shortcut field, press the key/combo directly, then Apply. Windows VK numbers are no longer entered manually."));
+            changed |= draw_hotkey_row(runtime, tr("对比开 / 关", "Comparison on/off"), 1, g_settings.hk_toggle_compare);
+            if (g_settings.strategy == capture_strategy::exact_snapshot_pair)
+            {
+                changed |= draw_hotkey_row(runtime, tr("捕获 Before", "Capture Before"), 2, g_settings.hk_capture_before);
+                changed |= draw_hotkey_row(runtime, tr("捕获 After", "Capture After"), 3, g_settings.hk_capture_after);
+            }
+            else
+            {
+                changed |= draw_hotkey_row(runtime, tr("冻结 / 解冻", "Freeze/unfreeze"), 4, g_settings.hk_toggle_freeze);
+            }
+            changed |= draw_hotkey_row(runtime, tr("自动扫屏开 / 关", "Auto sweep on/off"), 5, g_settings.hk_toggle_auto);
+            changed |= draw_hotkey_row(runtime, tr("向左移动", "Move left"), 6, g_settings.hk_left);
+            changed |= draw_hotkey_row(runtime, tr("向右移动", "Move right"), 7, g_settings.hk_right);
+            changed |= draw_hotkey_row(runtime, tr("完整 Before", "Full Before"), 8, g_settings.hk_full_before);
+            changed |= draw_hotkey_row(runtime, tr("完整 After", "Full After"), 9, g_settings.hk_full_after);
+        }
+
+        if (ImGui::CollapsingHeader(tr("DLSS5 / NGX 高级设置##NGX", "DLSS5 / NGX advanced##NGX")))
+        {
+            ImGui::TextWrapped("%s", tr(
+                "这些参数只影响“实时处理链”模式。精确截图对直接捕获实际显示帧，不依赖 NGX Feature 18。",
+                "These options only affect Live pipeline mode. Exact snapshot pairs capture the actually presented frames and do not depend on NGX Feature 18."));
             int max_age = static_cast<int>(g_settings.ngx_max_age_ms);
             if (ImGui::SliderInt(tr("Feature 18 快照最大年龄（ms）##MaxAge", "Max Feature 18 snapshot age (ms)##MaxAge"), &max_age, 1, 1000))
             {
@@ -1746,39 +2237,29 @@ namespace
             }
             if (ImGui::Checkbox(tr("允许不安全的跨设备 NGX 导入##UnsafeCrossDevice", "Allow unsafe cross-device NGX import##UnsafeCrossDevice"), &g_settings.allow_unsafe_cross_device_ngx))
                 changed = true;
-            ImGui::TextWrapped("%s", tr(
-                "除非正在诊断使用私有 D3D12 设备的 Bridge，否则保持关闭。共享资源句柄本身不能完成跨队列同步，开启后可能得到旧帧或未定义数据。",
-                "Leave this OFF unless diagnosing a bridge with a private D3D12 device. A shared resource handle alone does not synchronize queues and may produce stale/undefined data."));
         }
 
         if (ImGui::CollapsingHeader(tr("诊断与日志##Diagnostics", "Diagnostics & logging##Diagnostics")))
         {
-            changed |= ImGui::Checkbox(tr("详细日志（记录捕获来源变化等）##VerboseLog", "Verbose logging (capture-source changes, etc.)##VerboseLog"), &g_settings.verbose_logging);
-            ImGui::TextWrapped("%s", tr(
-                "插件的初始化、FrameCompare.fx 缺失、参数上传失败、NGX 错误等会写入 ReShade.log。开启详细日志后还会记录捕获来源变化和部分运行状态。",
-                "Initialization, missing FrameCompare.fx, parameter-upload failures and NGX errors are written to ReShade.log. Verbose logging also records capture-source changes and extra runtime status."));
-
-            ImGui::Separator();
-            ImGui::Text("%s: %s", tr("配置模式", "Configured mode"), capture_mode_name(g_settings.capture));
+            changed |= ImGui::Checkbox(tr("详细日志##VerboseLog", "Verbose logging##VerboseLog"), &g_settings.verbose_logging);
+            ImGui::Text("%s: %s", tr("工作流", "Workflow"), strategy_name(g_settings.strategy));
+            if (g_settings.strategy == capture_strategy::live_pipeline)
+                ImGui::Text("%s: %s", tr("实时 Before 来源", "Live Before source"), capture_mode_name(g_settings.capture));
             const std::string capture_source_display = localized_runtime_text(state->capture_source);
-            ImGui::Text("%s: %s", tr("当前捕获来源", "Current source"), capture_source_display.c_str());
+            ImGui::Text("%s: %s", tr("最近捕获来源", "Last capture source"), capture_source_display.c_str());
             if (!state->capture_note.empty())
             {
                 const std::string capture_note_display = localized_runtime_text(state->capture_note);
-                ImGui::TextWrapped("%s: %s", tr("捕获说明", "Capture note"), capture_note_display.c_str());
+                ImGui::TextWrapped("%s: %s", tr("说明", "Note"), capture_note_display.c_str());
             }
             ImGui::Text("%s: %s | Before %ux%u | After %ux%u", tr("画面对", "Pair"),
                 state->pair_valid ? tr("已就绪", "ready") : tr("未就绪", "not ready"),
                 state->before_width, state->before_height, state->after_width, state->after_height);
-            ImGui::Text("%s: %s | %s: %s | %s: %s",
-                tr("冻结", "Freeze"), g_frozen ? tr("已冻结", "frozen") : (g_freeze_armed ? tr("等待冻结", "armed") : tr("实时", "live")),
-                tr("扫屏", "Sweep"), g_auto_sweep_active ? tr("运行中", "active") : tr("关闭", "off"),
-                tr("文字预览", "Label preview"), g_settings.label_preview ? tr("开启", "on") : tr("关闭", "off"));
-            ImGui::Text("FrameCompare.fx: %s", state->composite != 0 ? tr("已就绪", "ready") : tr("缺失 / 未编译", "missing / not compiled"));
-            ImGui::Text("%s: %s", tr("参数上传", "Parameter upload"), state->params.available ? tr("已就绪", "ready") : tr("未初始化", "not initialized"));
+            ImGui::Text("FrameCompare.fx: %s | %s: %s",
+                state->composite != 0 ? tr("已就绪", "ready") : tr("缺失 / 未编译", "missing / not compiled"),
+                tr("参数上传", "Parameter upload"), state->params.available ? tr("已就绪", "ready") : tr("未初始化", "not initialized"));
 
             const auto diag = framecompare::ngx::get_diagnostics();
-            ImGui::Text("%s: %ls", tr("NGX Hook 模块", "NGX hook module"), diag.hook_module.empty() ? L"(none)" : diag.hook_module.c_str());
             ImGui::Text("NGX: %s %ux%u generation %llu", api_name(diag.latest_api), diag.latest_width, diag.latest_height,
                 static_cast<unsigned long long>(diag.latest_generation));
             ImGui::Text("%s: %llu / %llu / %llu / %llu",
@@ -1787,12 +2268,8 @@ namespace
                 static_cast<unsigned long long>(diag.feature18_evaluates),
                 static_cast<unsigned long long>(diag.successful_captures),
                 static_cast<unsigned long long>(diag.failed_captures));
-            ImGui::Text("Hooks D3D11 C/E/R: %d/%d/%d | D3D12 C/E/R: %d/%d/%d",
-                diag.create11_hooked, diag.eval11_hooked || diag.eval11_c_hooked, diag.release11_hooked,
-                diag.create12_hooked, diag.eval12_hooked || diag.eval12_c_hooked, diag.release12_hooked);
             if (!diag.last_error.empty())
-                ImGui::TextWrapped("%s: %s", tr("NGX 底层错误（原始信息）", "NGX hook error"), diag.last_error.c_str());
-
+                ImGui::TextWrapped("%s: %s", tr("NGX 底层错误", "NGX hook error"), diag.last_error.c_str());
             if (!g_last_status_message.empty())
                 ImGui::TextWrapped("%s: %s", tr("最近状态", "Last status"), g_last_status_message.c_str());
             if (!g_last_warning_message.empty())
@@ -1804,16 +2281,20 @@ namespace
         if (ImGui::CollapsingHeader(tr("配置文件##Config", "Configuration##Config")))
         {
             ImGui::TextWrapped("%s", tr(
-                "设置保存在 00-FrameCompare.addon64 同目录的 FrameCompare.ini。调好后可以把这个 INI 复制到其他游戏复用。",
-                "Settings are stored in FrameCompare.ini beside 00-FrameCompare.addon64. Copy that INI to other games to reuse your layout and hotkeys."));
+                "全部布局、快捷键和自定义 HUD 条目保存在 00-FrameCompare.addon64 同目录的 FrameCompare.ini，可直接复制到其他游戏。",
+                "All layout, hotkeys and custom HUD entries are saved in FrameCompare.ini beside 00-FrameCompare.addon64 and can be copied to other games."));
             if (ImGui::Button(tr("保存 FrameCompare.ini##SaveIni", "Save FrameCompare.ini##SaveIni")))
                 save_settings();
             ImGui::SameLine();
             if (ImGui::Button(tr("重新读取 FrameCompare.ini##ReloadIni", "Reload FrameCompare.ini##ReloadIni")))
             {
                 load_settings();
-                state->labels_dirty = true;
                 state->pair_valid = false;
+                state->exact_before_valid = false;
+                state->exact_after_valid = false;
+                state->pending_snapshot = snapshot_target::none;
+                state->logged_pair_ready = false;
+                state->warned_incompatible_pair = false;
                 sync_ngx_capture_enabled();
                 fc_log(reshade::log::level::info,
                     "已重新读取 FrameCompare.ini。",
@@ -1821,8 +2302,6 @@ namespace
             }
         }
 
-        if (labels_changed)
-            state->labels_dirty = true;
         if (changed)
             mark_settings_dirty();
     }
@@ -1831,11 +2310,11 @@ namespace
     {
         reshade::unregister_overlay(nullptr, draw_settings);
         reshade::unregister_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
+        reshade::unregister_event<reshade::addon_event::reshade_overlay>(on_reshade_overlay);
         reshade::unregister_event<reshade::addon_event::reshade_present>(on_reshade_present);
         reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
         reshade::unregister_event<reshade::addon_event::reshade_finish_effects>(on_finish_effects);
         reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(on_begin_effects);
-        reshade::unregister_event<reshade::addon_event::present>(on_present);
         reshade::unregister_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_runtime);
         reshade::unregister_event<reshade::addon_event::init_effect_runtime>(on_init_runtime);
     }
@@ -1859,11 +2338,11 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE re
 
     reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_runtime);
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_runtime);
-    reshade::register_event<reshade::addon_event::present>(on_present);
     reshade::register_event<reshade::addon_event::reshade_begin_effects>(on_begin_effects);
     reshade::register_event<reshade::addon_event::reshade_finish_effects>(on_finish_effects);
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
     reshade::register_event<reshade::addon_event::reshade_present>(on_reshade_present);
+    reshade::register_event<reshade::addon_event::reshade_overlay>(on_reshade_overlay);
     reshade::register_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
     reshade::register_overlay(nullptr, draw_settings);
 
@@ -1873,9 +2352,13 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE re
             "NGX hook initialization failed; generic modes such as Before ReShade FX remain available.");
     sync_ngx_capture_enabled();
 
+    const std::string init_keys = hotkey_description(g_settings.hk_capture_before) + " Before, " +
+        hotkey_description(g_settings.hk_capture_after) + " After, " +
+        hotkey_description(g_settings.hk_toggle_compare) + " Compare, " +
+        hotkey_description(g_settings.hk_toggle_auto) + " AutoSweep";
     fc_log(reshade::log::level::info,
-        "v1.2.0 初始化完成。F9 对比，F10 冻结，F11 自动扫屏，方向键移动分割线，Home/End 完整 Before/After。",
-        "v1.2.0 initialized. F9 compare, F10 freeze, F11 auto sweep, arrows move divider, Home/End full Before/After.");
+        "v1.3.0 初始化完成。当前快捷键：" + init_keys,
+        "v1.3.0 initialized. Current shortcuts: " + init_keys);
     return true;
 }
 

@@ -1,162 +1,72 @@
-# FrameCompare v1.2
+# FrameCompare v1.3
 
-FrameCompare 是一个 ReShade Add-on 级别的 Before / After 对比工具，目标是直接录制“原版画面 → 最终增强画面”的分割对比，不再依赖后期 PR 遮罩合成。
+FrameCompare 是 ReShade Add-on 级 Before/After 画质对比工具，目标是直接录制“原版 → 完整增强”的对比视频，不依赖 PR 后期拼接。
 
-## 主要功能
+## v1.3 核心变化
 
-- 插件级 Before / After 双画面捕获。
-- 支持 NGX Feature 18 / DLSS5 前 Color 捕获。
-- 支持 `Before ReShade FX`，适合 DLSS5 Feeder / ReShade 效果链注入。
-- 支持 Application Present 通用捕获模式。
-- F9 开关对比。
-- F10 冻结 / 解除冻结 Before + After。
-- F11 自动扫屏。
-- 左右方向键短按步进、长按连续移动。
-- Home / End 完整显示 Before / After。
-- 鼠标拖动分割线。
-- 普通 Wipe 与 SplitScreenCR 风格中央重映射。
-- OFF / ON 自定义文字、独立 X/Y、字号、透明度、描边。
-- 文字位置调试预览：即使 Before/After 未就绪，也能持续显示两个标签用于排版。
-- ShaderToggler 兼容：不重放被 ST 阻止的 HUD draw call。
-- 独立 `FrameCompare.ini`，可跨游戏复用。
-- 默认中文 UI，可实时切换 English。
-- 折叠式 UI 与插件内快速教程。
-- ReShade.log 关键日志、可选详细日志、UI 内最近状态/警告/错误。
-
-## GitHub Actions 自动编译
-
-把源码提交到 `main` 或 `master` 分支后，GitHub Actions 会自动执行 `Build FrameCompare`。
-
-成功后下载：
-
-```text
-FrameCompare-Windows-x64
-```
-
-v1.2 的 Artifact 已按可直接合并到游戏目录的结构整理：
-
-```text
-00-FrameCompare.addon64
-FrameCompare.ini.example
-reshade-shaders/
-  Shaders/
-    FrameCompare.fx
-INSTALL_CN.md
-FUNCTIONS_CN.md
-LOG_CN.md
-...
-```
-
-不要只复制 `.addon64`。`FrameCompare.fx` 也是运行所必需的组件。
-
-## 安装
-
-最简单的方法：把 GitHub Artifact 解压后，直接将里面的内容合并复制到游戏的 ReShade 根目录。
-
-要求：
-
-- ReShade 6.8 Add-on 版或兼容 API 20+。
-- 64-bit 游戏 / ReShade。
-
-详细中文安装与使用：`docs/INSTALL_CN.md`。
+- 默认工作流改为“精确截图对”：分别捕获真正 OFF 状态的 Before 与完整增强 ON 状态的 After。
+- 保留“实时处理链”作为高级模式，用于动态画面；Before 是否等于绝对原版取决于游戏、DLSS/RenoDX 与 ReShade 的注入位置。
+- 分屏合成重写为两种显示：普通同坐标擦除、SplitScreenCR 风格中心偏移分屏。
+- 分割线可移动、长按连续移动、自动扫屏、往返、隐藏、调宽度/透明度，并可在 ReShade 面板打开时拖动。
+- 标签改为 ReShade ImGui OSD 直接绘制，统一字号/透明度/描边/安全边距，解决旧版 ON/OFF 上下裁切。
+- 快捷键改为点击后直接按键/组合键捕获，不再输入 VK 数字。
+- 新增多条自定义 HUD：快捷键切换状态、读取 ReShade 实际 Effects State、按住快捷键、快捷键单次提示。
+- FrameCompare.ini 保存全部布局、快捷键与 HUD 条目，可跨游戏复制。
 
 ## 默认快捷键
 
-| 功能 | 默认键 |
-|---|---|
-| 开关对比 | F9 |
-| 冻结 / 解除冻结 | F10 |
-| 自动扫屏 | F11 |
-| 分割线向左 / 向右 | ← / → |
-| 完整 Before | Home |
-| 完整 After | End |
+- F7：捕获 Before（精确截图对）
+- F8：捕获 After（精确截图对）
+- F9：对比开/关
+- F10：冻结/解冻（实时模式）
+- F11：自动扫屏
+- Left / Right：移动分割线；短按按步长移动，长按连续移动
+- Ctrl+Left / Ctrl+Right：完整 Before / 完整 After
 
-## 捕获模式
+默认不占用 Home/End，避免和 ReShade 常用按键冲突。所有快捷键都可在插件 UI 中直接重新绑定。
 
-1. `Auto`：优先使用 NGX Feature 18，失败时回退到 `Before ReShade FX`。RenoDX / 原生 DLSS5 建议先用这个。
-2. `NGX Feature 18 strict`：只接受 DLSS5 Neural Rendering Evaluate 前的 Color 捕获，不回退。
-3. `Before ReShade FX`：推荐 DLSS5 Feeder / 效果链内注入。
-4. `Application Present`：通用、依赖 Add-on/Present 顺序。
+## 最推荐的录制方式
 
-## “Before”的含义
+1. 选择“精确截图对”。
+2. 把 DLSS5、RenoDX、ReShade 预设等切到你认为的真正 OFF 状态，按“捕获 Before”。
+3. 打开完整增强状态，按“捕获 After”。
+4. 开启对比，用分割线、长按移动或自动扫屏直接录像。
 
-FrameCompare 的目标不是“关闭全部插件然后重新渲染一帧”，而是在合适的处理阶段保存一份 Before，再让 DLSS5 / RenoDX / ReShade 正常继续。因此它不会为了对比去关闭 DLSS5 temporal history，也不会主动恢复 ShaderToggler 已阻止的 HUD。
+捕获请求会在 ReShade 设置面板关闭后抓下一帧，并暂时跳过 FrameCompare 自身的合成和 OSD，避免把插件界面录进截图对。
 
-NGX Feature 18 的 Color 是 Neural Rendering 的真实输入，但个别游戏/Bridge 中它可能仍是内部中间资源，不保证数学上完全等价于“彻底卸载 DLSS5 后的最终 Present”。插件诊断会显示实际捕获来源。
+## 安装
 
-## UI
-
-v1.2 默认中文，并提供：
-
-- `中文 / English` 切换。
-- 快速教程。
-- 基础设置。
-- 分割线与动画。
-- 文字标签。
-- 快捷键。
-- DLSS5 / NGX 高级设置。
-- 诊断与日志。
-- 配置文件。
-
-除快速教程外，其余大部分区域默认折叠，避免 Add-ons 页面过长。
-
-## 日志
-
-关键问题会写入 `ReShade.log`，搜索：
+实际运行需要 Windows x64、支持 Add-on 的 ReShade，以及编译得到的 `00-FrameCompare.addon64`。将文件放成：
 
 ```text
-[FrameCompare]
+<游戏目录>/00-FrameCompare.addon64
+<游戏目录>/FrameCompare.ini               （首次可不放）
+<游戏目录>/reshade-shaders/Shaders/FrameCompare.fx
 ```
 
-正常时日志会明确记录“初始化完成”“合成着色器已就绪”，首次取得有效 Before/After 后还会记录“画面对已就绪”，这样不需要靠猜测判断插件是否工作。
-
-详细说明：`docs/LOG_CN.md`。
-
-用户提供的 v1.1 测试日志已确认 Add-on 本体成功加载，但 `FrameCompare.fx / FrameCompareComposite` 没有被找到。v1.2 一方面修正 Artifact 安装目录，另一方面修复该警告每帧刷屏的问题，并在 UI 顶部直接给出中文红色错误提示。
-
-## 架构
-
-```text
-Game rendering / ShaderToggler blocking
-        │
-        ├─ Native path: NGX Feature 18 Color ──> Before
-        │
-        └─ Generic path: ReShade begin effects ─> Before fallback
-                                             │
-                                      DLSS/RenoDX/ReShade
-                                             │
-                                  ReShade finish effects
-                                             │
-                                          After
-                                             │
-                      FrameCompareComposite (explicit technique)
-                                             │
-                                          Present
-```
-
-`FrameCompare.fx` 不作为普通 preset technique 长期开启；Add-on 绑定 Before/After/参数/标签纹理，并在正确阶段显式调用 `FrameCompareComposite`。
+更具体的安装、录制、HUD 配置见 `docs/INSTALL_CN.md` 与 `docs/FUNCTIONS_CN.md`。
 
 ## 构建
 
-Windows + Visual Studio 2022：
+需要 Visual Studio 2022 x64 C++ 工具链、CMake 3.24+ 与 Git：
 
 ```bat
 build_vs2022.bat
 ```
 
-或：
+或者：
 
 ```bat
 cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
 ```
 
-CMake 会自动获取 ReShade headers 与 MinHook，也可通过 cache path 指向已有源码。
+CMake 默认获取 ReShade `main`（含匹配的 ImGui 子模块）与 MinHook v1.3.4。也可以通过 `FRAMECOMPARE_RESHADE_ROOT` / `FRAMECOMPARE_MINHOOK_ROOT` 指向本地源码。
 
-## 文档
+源码静态检查：
 
-- `docs/INSTALL_CN.md`：安装和基础使用。
-- `docs/FUNCTIONS_CN.md`：完整功能规格。
-- `docs/LOG_CN.md`：日志与故障排查。
-- `docs/AUDIT.md`：源码审查与已知边界。
-- `THIRD_PARTY.md`：第三方依赖与参考说明。
+```bat
+python tools\static_audit.py
+```
+
+本源码包只声明已经完成的静态审计；没有在当前环境伪装成已通过 Windows/MSVC 编译或游戏实机验证。见 `docs/AUDIT.md`。
