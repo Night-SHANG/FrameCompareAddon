@@ -13,6 +13,7 @@
 #include "NgxHook.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -36,7 +37,7 @@ using clock_type = std::chrono::steady_clock;
 extern "C" __declspec(dllexport) const char *NAME = "FrameCompare";
 extern "C" __declspec(dllexport) const char *AUTHOR = "Night / OpenAI-assisted";
 extern "C" __declspec(dllexport) const char *DESCRIPTION =
-    "ReShade add-on for plugin-level Before/After comparison, freeze, animated divider, labels and portable profiles.";
+    "FrameCompare 画面对比工具 / plugin-level Before/After comparison, freeze, animated divider, labels and portable profiles.";
 
 namespace
 {
@@ -54,9 +55,16 @@ namespace
         split_screen_cr = 1,
     };
 
+    enum class ui_language : int
+    {
+        chinese = 0,
+        english = 1,
+    };
+
     struct settings
     {
         bool enabled = true;
+        ui_language language = ui_language::chinese;
         capture_mode capture = capture_mode::automatic;
         bool before_on_left = true;
         display_mode display = display_mode::normal_wipe;
@@ -100,6 +108,7 @@ namespace
         uint32_t ngx_max_age_ms = 250;
         uint32_t d3d12_color_state = static_cast<uint32_t>(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         bool allow_unsafe_cross_device_ngx = false;
+        bool verbose_logging = false;
     };
 
     settings g_settings;
@@ -113,6 +122,61 @@ namespace
     std::filesystem::path g_ini_path;
     bool g_settings_dirty = false;
     clock_type::time_point g_last_ini_save = clock_type::now();
+
+    std::string g_last_status_message;
+    std::string g_last_warning_message;
+    std::string g_last_error_message;
+    std::atomic_bool g_logged_fx_ready { false };
+    std::atomic_bool g_logged_fx_missing { false };
+
+    const char *tr(const char *zh, const char *en)
+    {
+        return g_settings.language == ui_language::chinese ? zh : en;
+    }
+
+    void fc_log(reshade::log::level level, std::string_view zh, std::string_view en)
+    {
+        const std::string_view selected = g_settings.language == ui_language::chinese ? zh : en;
+        std::string line = "FrameCompare: ";
+        line.append(selected.data(), selected.size());
+        reshade::log::message(level, line.c_str());
+
+        const std::string current(selected.data(), selected.size());
+        if (level == reshade::log::level::warning)
+            g_last_warning_message = current;
+        else if (level == reshade::log::level::error)
+            g_last_error_message = current;
+        else
+            g_last_status_message = current;
+    }
+
+    std::string localized_runtime_text(const std::string &text)
+    {
+        if (g_settings.language == ui_language::english || text.empty())
+            return text;
+
+        if (text == "None") return "无";
+        if (text == "Immediately before ReShade FX") return "ReShade FX 执行前";
+        if (text == "Before ReShade FX (Auto fallback)") return "ReShade FX 执行前（自动模式回退）";
+        if (text == "Application Present hook backbuffer (ordering-dependent generic mode)") return "Application Present 后备缓冲（通用模式，结果依赖插件执行顺序）";
+        if (text == "NGX Feature 18 strict mode: no fresh usable snapshot") return "严格 NGX Feature 18：当前帧没有可用的新快照";
+        if (text == "NGX Feature 18 D3D11 Color (pre-Evaluate)") return "NGX Feature 18 D3D11 Color（Evaluate 前）";
+        if (text == "NGX Feature 18 D3D12 Color (pre-Evaluate)") return "NGX Feature 18 D3D12 Color（Evaluate 前）";
+        if (text == "NGX Feature 18 cross-device D3D12 snapshot (UNSAFE opt-in; synchronization not guaranteed)") return "NGX Feature 18 跨设备 D3D12 快照（不安全选项；无法保证同步）";
+        if (text == "NGX Feature 18 D3D12->D3D11 shared snapshot (UNSAFE opt-in; synchronization not guaranteed)") return "NGX Feature 18 D3D12→D3D11 共享快照（不安全选项；无法保证同步）";
+        if (text == "Newest NGX Feature 18 snapshot is too old for this frame.") return "最新 NGX Feature 18 快照对当前帧来说已经过期。";
+        if (text == "NGX snapshot was found but could not be copied into the comparison texture.") return "已找到 NGX 快照，但无法复制到 FrameCompare 对比纹理。";
+        if (text == "No fresh Present-stage Before image was available for this ReShade effect cycle.") return "当前 ReShade 效果周期没有新的 Present 阶段 Before 画面。";
+        if (text == "NGX D3D11 snapshot belongs to a different device; safe cross-device D3D11 import is unavailable.") return "NGX D3D11 快照来自其他设备，无法安全进行跨设备 D3D11 导入。";
+        if (text == "NGX uses a different D3D12 device. Cross-device capture is disabled because queue synchronization cannot be guaranteed.") return "NGX 使用了另一个 D3D12 设备；由于无法保证队列同步，跨设备捕获已关闭。";
+        if (text == "Unable to open NGX D3D12 shared snapshot on the ReShade D3D12 device.") return "无法在 ReShade D3D12 设备上打开 NGX D3D12 共享快照。";
+        if (text == "NGX Feature 18 is on a private D3D12 device while ReShade is D3D11. Unsafe cross-API import is disabled.") return "NGX Feature 18 位于私有 D3D12 设备，而 ReShade 是 D3D11；不安全的跨 API 导入已关闭。";
+        if (text == "ReShade D3D11 device does not expose ID3D11Device1 for shared NT handle import.") return "ReShade D3D11 设备没有提供共享 NT Handle 导入所需的 ID3D11Device1。";
+        if (text == "Unable to open NGX D3D12 shared texture from D3D11.") return "无法从 D3D11 打开 NGX D3D12 共享纹理。";
+        if (text == "NGX snapshot API does not match the ReShade runtime API.") return "NGX 快照 API 与当前 ReShade Runtime API 不匹配。";
+
+        return text; // 未识别的底层诊断保留原文，便于排错。
+    }
 
     std::mutex g_runtime_mutex;
     std::unordered_map<uint64_t, effect_runtime *> g_runtime_by_swapchain;
@@ -201,6 +265,7 @@ namespace
         };
 
         g_settings.enabled = getb("General.Enabled", g_settings.enabled);
+        g_settings.language = static_cast<ui_language>(std::clamp(geti("General.Language", static_cast<int>(g_settings.language)), 0, 1));
         g_settings.capture = static_cast<capture_mode>(std::clamp(geti("General.CaptureMode", static_cast<int>(g_settings.capture)), 0, 3));
         g_settings.before_on_left = getb("General.BeforeOnLeft", g_settings.before_on_left);
         g_settings.display = static_cast<display_mode>(std::clamp(geti("General.DisplayMode", static_cast<int>(g_settings.display)), 0, 1));
@@ -243,6 +308,7 @@ namespace
         g_settings.ngx_max_age_ms = std::clamp(getu("NGX.MaxSnapshotAgeMs", g_settings.ngx_max_age_ms), 1u, 5000u);
         g_settings.d3d12_color_state = getu("NGX.D3D12ColorState", g_settings.d3d12_color_state);
         g_settings.allow_unsafe_cross_device_ngx = getb("NGX.AllowUnsafeCrossDevice", g_settings.allow_unsafe_cross_device_ngx);
+        g_settings.verbose_logging = getb("Diagnostics.VerboseLogging", g_settings.verbose_logging);
 
         // Transient recording state always starts clean even when a portable INI is reused.
         g_frozen = false;
@@ -256,7 +322,9 @@ namespace
         std::ofstream f(g_ini_path, std::ios::binary | std::ios::trunc);
         if (!f)
         {
-            reshade::log::message(reshade::log::level::warning, "FrameCompare: unable to write FrameCompare.ini.");
+            fc_log(reshade::log::level::warning,
+                "无法写入 FrameCompare.ini。",
+                "Unable to write FrameCompare.ini.");
             return;
         }
 
@@ -264,6 +332,7 @@ namespace
         f << "; Copy this INI together with 00-FrameCompare.addon64 to reuse the same controls and layout.\n\n";
         f << "[General]\n";
         f << "Enabled=" << (g_settings.enabled ? 1 : 0) << "\n";
+        f << "Language=" << static_cast<int>(g_settings.language) << "\n";
         f << "CaptureMode=" << static_cast<int>(g_settings.capture) << "\n";
         f << "BeforeOnLeft=" << (g_settings.before_on_left ? 1 : 0) << "\n";
         f << "DisplayMode=" << static_cast<int>(g_settings.display) << "\n\n";
@@ -309,7 +378,10 @@ namespace
         f << "[NGX]\n";
         f << "MaxSnapshotAgeMs=" << g_settings.ngx_max_age_ms << "\n";
         f << "D3D12ColorState=0x" << std::hex << std::uppercase << g_settings.d3d12_color_state << std::dec << "\n";
-        f << "AllowUnsafeCrossDevice=" << (g_settings.allow_unsafe_cross_device_ngx ? 1 : 0) << "\n";
+        f << "AllowUnsafeCrossDevice=" << (g_settings.allow_unsafe_cross_device_ngx ? 1 : 0) << "\n\n";
+
+        f << "[Diagnostics]\n";
+        f << "VerboseLogging=" << (g_settings.verbose_logging ? 1 : 0) << "\n";
 
         g_settings_dirty = false;
         g_last_ini_save = clock_type::now();
@@ -413,6 +485,10 @@ namespace
 
         std::string capture_source = "None";
         std::string capture_note;
+        std::string last_logged_capture_source;
+        std::string last_logged_ngx_error;
+        uint64_t last_logged_ngx_failures = 0;
+        bool logged_pair_ready = false;
         uint32_t before_width = 0;
         uint32_t before_height = 0;
         uint32_t after_width = 0;
@@ -642,7 +718,9 @@ namespace
         const bool a = create_label_texture(runtime, state->before_label, g_settings.before_text.data());
         const bool b = create_label_texture(runtime, state->after_label, g_settings.after_text.data());
         if (!a || !b)
-            reshade::log::message(reshade::log::level::warning, "FrameCompare: failed to rasterize one or more label textures.");
+            fc_log(reshade::log::level::warning,
+                "一个或多个文字标签纹理生成失败。请检查字体名称和文字内容。",
+                "Failed to rasterize one or more label textures. Check the font name and label text.");
 
         if (state->before_label.srv != 0)
             runtime->update_texture_bindings("FRAMECOMPARE_LABEL_BEFORE", state->before_label.srv, state->before_label.srv);
@@ -742,10 +820,18 @@ namespace
 
     void refresh_effect_handles(effect_runtime *runtime, runtime_state *state)
     {
+        const bool was_ready = state->composite != 0;
         state->composite = runtime->find_technique("FrameCompare.fx", "FrameCompareComposite");
         if (state->composite != 0)
+        {
             runtime->set_technique_state(state->composite, false);
-        state->warned_missing_fx = false;
+            if (!was_ready && !g_logged_fx_ready.exchange(true))
+                fc_log(reshade::log::level::info,
+                    "已找到 FrameCompare.fx / FrameCompareComposite，合成着色器已就绪。",
+                    "FrameCompare.fx / FrameCompareComposite found; compositor is ready.");
+            g_logged_fx_missing.store(false);
+            state->warned_missing_fx = false;
+        }
         if (state->params.srv != 0)
             runtime->update_texture_bindings("FRAMECOMPARE_PARAMS", state->params.srv, state->params.srv);
         if (state->before.srv != 0)
@@ -1112,8 +1198,11 @@ namespace
             {
                 if (!state->warned_missing_fx)
                 {
-                    reshade::log::message(reshade::log::level::warning,
-                        "FrameCompare: FrameCompare.fx / FrameCompareComposite was not found. Install the companion shader in ReShade's shader search path.");
+                    g_logged_fx_ready.store(false);
+                    if (!g_logged_fx_missing.exchange(true))
+                        fc_log(reshade::log::level::warning,
+                            "未找到 FrameCompare.fx / FrameCompareComposite。请把 FrameCompare.fx 放到 reshade-shaders\\Shaders\\ 后重新加载效果。",
+                            "FrameCompare.fx / FrameCompareComposite was not found. Put FrameCompare.fx in reshade-shaders\\Shaders\\ and reload effects.");
                     state->warned_missing_fx = true;
                 }
                 return false;
@@ -1124,8 +1213,9 @@ namespace
         {
             if (!state->warned_param_upload)
             {
-                reshade::log::message(reshade::log::level::error,
-                    "FrameCompare: this graphics backend does not support command-list texture uploads required by the Performance-Mode-safe parameter path.");
+                fc_log(reshade::log::level::error,
+                    "当前图形后端不支持参数纹理上传，FrameCompare 合成无法继续。",
+                    "This graphics backend does not support the parameter-texture upload required by FrameCompare.");
                 state->warned_param_upload = true;
             }
             return false;
@@ -1160,6 +1250,8 @@ namespace
             if (g_primary_runtime == nullptr)
                 g_primary_runtime = runtime;
         }
+        // Effects may still be compiling at init_runtime. Do not diagnose a missing
+        // FrameCompare.fx here; reshade_reloaded_effects is the first reliable check.
         refresh_effect_handles(runtime, state);
     }
 
@@ -1191,7 +1283,19 @@ namespace
     void on_reloaded_effects(effect_runtime *runtime)
     {
         if (auto *state = runtime->get_private_data<runtime_state>())
+        {
+            state->warned_missing_fx = false;
             refresh_effect_handles(runtime, state);
+            if (state->composite == 0)
+            {
+                g_logged_fx_ready.store(false);
+                if (!g_logged_fx_missing.exchange(true))
+                    fc_log(reshade::log::level::warning,
+                        "重新加载效果后仍未找到 FrameCompare.fx / FrameCompareComposite。",
+                        "FrameCompare.fx / FrameCompareComposite is still missing after effect reload.");
+                state->warned_missing_fx = true;
+            }
+        }
     }
 
     void on_present(command_queue *queue, swapchain *swapchain, const rect *, const rect *, uint32_t, const rect *)
@@ -1304,6 +1408,15 @@ namespace
                     state->after_width = state->after.width;
                     state->after_height = state->after.height;
                     state->pair_valid = state->before.ready && state->after.ready;
+                    if (state->pair_valid && !state->logged_pair_ready)
+                    {
+                        const std::string dims = std::to_string(state->before_width) + "x" + std::to_string(state->before_height) +
+                            " / " + std::to_string(state->after_width) + "x" + std::to_string(state->after_height);
+                        fc_log(reshade::log::level::info,
+                            "Before/After 画面对已就绪：" + dims + "；捕获来源：" + localized_runtime_text(state->capture_source),
+                            "Before/After pair is ready: " + dims + "; capture source: " + state->capture_source);
+                        state->logged_pair_ready = true;
+                    }
                     if (g_freeze_armed && state->pair_valid)
                     {
                         g_freeze_armed = false;
@@ -1337,10 +1450,45 @@ namespace
         runtime->render_technique(state->composite, cmd, rtv, rtv_srgb);
     }
 
+    void emit_runtime_log_diagnostics(runtime_state *state)
+    {
+        if (g_settings.verbose_logging && !state->capture_source.empty() &&
+            state->capture_source != state->last_logged_capture_source)
+        {
+            const std::string zh = "捕获来源变化：" + localized_runtime_text(state->capture_source);
+            const std::string en = "Capture source changed: " + state->capture_source;
+            fc_log(reshade::log::level::info, zh, en);
+            state->last_logged_capture_source = state->capture_source;
+        }
+
+        const auto diag = framecompare::ngx::get_diagnostics();
+        if (!diag.last_error.empty() && diag.last_error != state->last_logged_ngx_error)
+        {
+            const std::string zh = "NGX 捕获错误：" + diag.last_error;
+            const std::string en = "NGX capture error: " + diag.last_error;
+            fc_log(reshade::log::level::error, zh, en);
+            state->last_logged_ngx_error = diag.last_error;
+        }
+        if (diag.failed_captures != state->last_logged_ngx_failures)
+        {
+            if (g_settings.verbose_logging && diag.failed_captures > state->last_logged_ngx_failures)
+            {
+                const std::string count = std::to_string(diag.failed_captures);
+                fc_log(reshade::log::level::warning,
+                    "NGX 捕获失败累计次数：" + count,
+                    "NGX capture failure count: " + count);
+            }
+            state->last_logged_ngx_failures = diag.failed_captures;
+        }
+    }
+
     void on_reshade_present(effect_runtime *runtime)
     {
         if (auto *state = runtime->get_private_data<runtime_state>())
+        {
             update_hotkeys(runtime, state);
+            emit_runtime_log_diagnostics(state);
+        }
         sync_ngx_capture_enabled();
     }
 
@@ -1359,12 +1507,20 @@ namespace
     {
         switch (mode)
         {
-        case capture_mode::automatic: return "Auto: NGX Feature 18, fallback to Before ReShade FX";
-        case capture_mode::ngx_feature18: return "NGX Feature 18 strict (pre-Evaluate Color)";
-        case capture_mode::before_reshade_fx: return "Before ReShade FX (recommended for Feeder/effect-chain injection)";
-        case capture_mode::application_present: return "Application Present hook (generic / ordering dependent)";
+        case capture_mode::automatic:
+            return tr("自动：优先 NGX Feature 18，失败时回退到 ReShade FX 前",
+                      "Auto: NGX Feature 18, fallback to Before ReShade FX");
+        case capture_mode::ngx_feature18:
+            return tr("严格 NGX Feature 18（Evaluate 前 Color）",
+                      "NGX Feature 18 strict (pre-Evaluate Color)");
+        case capture_mode::before_reshade_fx:
+            return tr("ReShade FX 前（推荐 Feeder / 效果链注入）",
+                      "Before ReShade FX (recommended for Feeder/effect-chain injection)");
+        case capture_mode::application_present:
+            return tr("Application Present 钩子（通用 / 依赖顺序）",
+                      "Application Present hook (generic / ordering dependent)");
         }
-        return "Unknown";
+        return tr("未知", "Unknown");
     }
 
     const char *api_name(framecompare::ngx::snapshot_api api)
@@ -1386,163 +1542,283 @@ namespace
         bool changed = false;
         bool labels_changed = false;
 
-        if (ImGui::Checkbox("Enable comparison", &g_settings.enabled))
+        int language = static_cast<int>(g_settings.language);
+        const char *language_items[] = { "中文", "English" };
+        if (ImGui::Combo("界面语言 / UI Language##FrameCompareLanguage", &language, language_items, IM_ARRAYSIZE(language_items)))
         {
+            g_settings.language = static_cast<ui_language>(language);
             changed = true;
-            state->pair_valid = false;
-            state->before_this_cycle = false;
-            state->fallback_before_this_cycle = false;
-            if (!g_settings.enabled)
+            fc_log(reshade::log::level::info,
+                "界面语言已切换为中文。",
+                "UI language changed to English.");
+        }
+
+        ImGui::TextDisabled("FrameCompare v1.2.0 | %s: %s | %s: %s",
+            tr("插件状态", "Add-on"), tr("已加载", "loaded"),
+            tr("画面对", "Pair"), state->pair_valid ? tr("已就绪", "ready") : tr("等待捕获", "waiting"));
+
+        if (state->composite == 0)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.35f, 0.25f, 1.0f));
+            ImGui::TextWrapped("%s", tr(
+                "错误：未找到 FrameCompare.fx。插件本体已加载，但无法显示对比画面。请把 FrameCompare.fx 放到 reshade-shaders\\Shaders\\，然后在 ReShade 中重新加载效果或重启游戏。",
+                "ERROR: FrameCompare.fx is missing. The add-on loaded, but comparison rendering cannot work. Put FrameCompare.fx in reshade-shaders\\Shaders\\, then reload effects or restart the game."));
+            ImGui::PopStyleColor();
+        }
+        else
+        {
+            ImGui::TextDisabled("%s", tr("合成着色器：已就绪", "Composite shader: ready"));
+        }
+
+        if (ImGui::CollapsingHeader(tr("快速教程 / 使用说明##QuickStart", "Quick start / How to use##QuickStart"), ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::TextWrapped("%s", tr(
+                "1. 安装：00-FrameCompare.addon64 放在 ReShade Add-on 目录；FrameCompare.fx 必须放在 reshade-shaders\\Shaders\\。",
+                "1. Install: place 00-FrameCompare.addon64 in the ReShade add-on directory; FrameCompare.fx must be in reshade-shaders\\Shaders\\."));
+            ImGui::TextWrapped("%s", tr(
+                "2. 捕获模式：RenoDX / 插件方式 DLSS5 先用“自动”；Feeder / ReShade 效果链方式用“ReShade FX 前”。",
+                "2. Capture mode: for RenoDX/native DLSS5 start with Auto; for Feeder/ReShade effect-chain injection use Before ReShade FX."));
+            ImGui::TextWrapped("%s", tr(
+                "3. F9 开关对比；F10 冻结/解除冻结当前 Before+After；F11 自动扫屏；左右方向键移动分割线；Home/End 显示完整 Before/After。",
+                "3. F9 toggles comparison; F10 freezes/unfreezes the current Before+After pair; F11 auto-sweeps; Left/Right move the divider; Home/End show full Before/After."));
+            ImGui::TextWrapped("%s", tr(
+                "4. 调文字：展开“文字标签”，开启“文字位置调试预览”，调整 OFF/ON 的 X/Y、字号、描边；录制前关闭预览。",
+                "4. Labels: open Labels, enable placement preview, tune OFF/ON X/Y, size and outline, then disable preview before recording."));
+            ImGui::TextWrapped("%s", tr(
+                "5. 判断是否正常：展开“诊断与日志”，至少应看到 FrameCompare.fx=已就绪、参数上传=已就绪；开始对比后 Pair 应为已就绪。错误会写入 ReShade.log。",
+                "5. Verify: in Diagnostics & Logging, FrameCompare.fx and parameter upload should be ready; after comparison starts, Pair should become ready. Errors are written to ReShade.log."));
+            ImGui::TextWrapped("%s", tr(
+                "6. 日志：在 ReShade.log 搜索 [FrameCompare]。正常至少会看到“初始化完成”和“合成着色器已就绪”；错误/警告不会再逐帧刷屏。",
+                "6. Log: search ReShade.log for [FrameCompare]. A healthy setup should show initialization and compositor-ready messages; errors/warnings are rate-limited and do not spam every frame."));
+        }
+
+        if (ImGui::CollapsingHeader(tr("基础设置##Basic", "Basic settings##Basic")))
+        {
+            if (ImGui::Checkbox(tr("启用对比##EnableCompare", "Enable comparison##EnableCompare"), &g_settings.enabled))
             {
-                g_frozen = false;
-                g_freeze_armed = false;
-                g_auto_sweep_active = false;
+                changed = true;
+                state->pair_valid = false;
+                state->before_this_cycle = false;
+                state->fallback_before_this_cycle = false;
+                if (!g_settings.enabled)
+                {
+                    g_frozen = false;
+                    g_freeze_armed = false;
+                    g_auto_sweep_active = false;
+                }
+                sync_ngx_capture_enabled();
+                if (g_settings.verbose_logging)
+                    fc_log(reshade::log::level::info,
+                        g_settings.enabled ? "对比已启用。" : "对比已关闭。",
+                        g_settings.enabled ? "Comparison enabled." : "Comparison disabled.");
             }
-            sync_ngx_capture_enabled();
+
+            bool freeze_ui = g_frozen || g_freeze_armed;
+            if (ImGui::Checkbox(tr("冻结 Before + After 画面##FreezePair", "Freeze Before + After pair##FreezePair"), &freeze_ui))
+            {
+                set_freeze_requested(state, freeze_ui);
+                if (g_settings.verbose_logging)
+                    fc_log(reshade::log::level::info,
+                        freeze_ui ? "已请求冻结 Before + After。" : "已解除冻结。",
+                        freeze_ui ? "Freeze requested for Before + After." : "Freeze disabled.");
+            }
+            if (g_freeze_armed)
+                ImGui::TextDisabled("%s", tr("等待下一组有效 Before/After 后冻结。", "Freeze is armed and will lock on the next valid Before/After pair."));
+
+            int capture = static_cast<int>(g_settings.capture);
+            const char *capture_items_zh[] = {
+                "自动：NGX Feature 18 -> ReShade FX 前回退",
+                "严格 NGX Feature 18",
+                "ReShade FX 前",
+                "Application Present 钩子"
+            };
+            const char *capture_items_en[] = {
+                "Auto: NGX Feature 18 -> Before ReShade FX fallback",
+                "NGX Feature 18 strict",
+                "Before ReShade FX",
+                "Application Present hook"
+            };
+            const char *const *capture_items = g_settings.language == ui_language::chinese ? capture_items_zh : capture_items_en;
+            if (ImGui::Combo(tr("Before 捕获模式##CaptureMode", "Before capture mode##CaptureMode"), &capture, capture_items, 4))
+            {
+                g_settings.capture = static_cast<capture_mode>(capture);
+                changed = true;
+                state->pair_valid = false;
+                sync_ngx_capture_enabled();
+            }
+            ImGui::TextWrapped("%s", tr(
+                "RenoDX / 原生 Neural Rendering 建议先用自动模式。DLSS5 Feeder 或运行在 ReShade 效果链中的效果，使用“ReShade FX 前”。严格 NGX 不会回退到其他捕获阶段。",
+                "For RenoDX/native Neural Rendering, try Auto first. For DLSS5 Feeder or effects inside the ReShade chain, use Before ReShade FX. Strict NGX never falls back to another stage."));
+
+            changed |= ImGui::Checkbox(tr("Before 画面放左侧##BeforeOnLeft", "Before image on left##BeforeOnLeft"), &g_settings.before_on_left);
+            int display = static_cast<int>(g_settings.display);
+            const char *display_items_zh[] = { "普通擦除（两边保持完整画面坐标）", "SplitScreenCR 风格中央重映射" };
+            const char *display_items_en[] = { "Normal wipe (same full-frame coordinates)", "SplitScreenCR-style centered remap" };
+            const char *const *display_items = g_settings.language == ui_language::chinese ? display_items_zh : display_items_en;
+            if (ImGui::Combo(tr("显示模式##DisplayMode", "Display mode##DisplayMode"), &display, display_items, 2))
+            {
+                g_settings.display = static_cast<display_mode>(display);
+                changed = true;
+            }
         }
 
-        bool freeze_ui = g_frozen || g_freeze_armed;
-        if (ImGui::Checkbox("Freeze Before + After pair", &freeze_ui))
-            set_freeze_requested(state, freeze_ui);
-        if (g_freeze_armed)
-            ImGui::TextDisabled("Freeze is armed and will lock on the next valid Before/After pair.");
+        if (ImGui::CollapsingHeader(tr("分割线与动画##Divider", "Divider & animation##Divider")))
+        {
+            if (ImGui::SliderFloat(tr("分割位置##DividerPosition", "Divider position##DividerPosition"), &g_settings.split_position, 0.0f, 1.0f, "%.3f"))
+            {
+                g_auto_sweep_active = false;
+                changed = true;
+            }
+            changed |= ImGui::SliderFloat(tr("短按移动步长##MoveStep", "Short press step##MoveStep"), &g_settings.move_step, 0.001f, 0.20f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("长按触发延迟（秒）##HoldDelay", "Hold delay (s)##HoldDelay"), &g_settings.hold_delay, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat(tr("长按移动速度（屏/秒）##MoveSpeed", "Hold movement speed (screen/s)##MoveSpeed"), &g_settings.move_speed, 0.01f, 2.0f, "%.2f");
 
-        int capture = static_cast<int>(g_settings.capture);
-        const char *capture_items[] = {
-            "Auto: NGX Feature 18 -> Before ReShade FX fallback",
-            "NGX Feature 18 strict",
-            "Before ReShade FX",
-            "Application Present hook"
-        };
-        if (ImGui::Combo("Before capture mode", &capture, capture_items, IM_ARRAYSIZE(capture_items)))
-        {
-            g_settings.capture = static_cast<capture_mode>(capture);
-            changed = true;
-            state->pair_valid = false;
-            sync_ngx_capture_enabled();
-        }
-        ImGui::TextWrapped("For RenoDX/native Neural Rendering, try Auto first. For DLSS5 Feeder or another effect that runs inside the ReShade effect chain, use Before ReShade FX. Strict NGX never falls back to a potentially different capture stage.");
+            if (ImGui::Checkbox(tr("自动扫屏##AutoSweep", "Auto sweep active##AutoSweep"), &g_auto_sweep_active))
+            {
+                if (g_auto_sweep_active)
+                    start_auto_sweep();
+            }
+            changed |= ImGui::SliderFloat(tr("自动扫屏速度##AutoSweepSpeed", "Auto sweep speed##AutoSweepSpeed"), &g_settings.auto_sweep_speed, 0.01f, 2.0f, "%.2f");
+            changed |= ImGui::Checkbox(tr("自动往返##PingPong", "Auto sweep ping-pong##PingPong"), &g_settings.auto_sweep_pingpong);
+            changed |= ImGui::Checkbox(tr("自动扫屏从完整 Before 开始##AutoReset", "Auto sweep starts from full Before##AutoReset"), &g_settings.auto_reset_from_before);
+            if (!g_settings.auto_reset_from_before)
+            {
+                int dir = g_settings.auto_sweep_direction;
+                if (ImGui::RadioButton(tr("物理方向：左 -> 右##DirRight", "Physical direction: left -> right##DirRight"), dir > 0)) { g_settings.auto_sweep_direction = 1; changed = true; }
+                ImGui::SameLine();
+                if (ImGui::RadioButton(tr("右 -> 左##DirLeft", "right -> left##DirLeft"), dir < 0)) { g_settings.auto_sweep_direction = -1; changed = true; }
+            }
 
-        if (ImGui::Checkbox("Before image on left", &g_settings.before_on_left)) changed = true;
-        int display = static_cast<int>(g_settings.display);
-        const char *display_items[] = { "Normal wipe (same full-frame coordinates)", "SplitScreenCR-style centered remap" };
-        if (ImGui::Combo("Display mode", &display, display_items, IM_ARRAYSIZE(display_items)))
-        {
-            g_settings.display = static_cast<display_mode>(display);
-            changed = true;
+            changed |= ImGui::Checkbox(tr("显示分割线##ShowDivider", "Show divider##ShowDivider"), &g_settings.show_border);
+            changed |= ImGui::SliderFloat(tr("分割线宽度##DividerWidth", "Divider width##DividerWidth"), &g_settings.border_width, 0.0f, 0.02f, "%.4f");
+            changed |= ImGui::SliderFloat(tr("分割线透明度##DividerOpacity", "Divider opacity##DividerOpacity"), &g_settings.border_opacity, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::Checkbox(tr("ReShade 面板打开时允许鼠标拖动分割线##ScreenDrag", "Drag divider while ReShade overlay is open##ScreenDrag"), &g_settings.screen_drag);
+            changed |= ImGui::SliderFloat(tr("拖动抓取范围（px）##DragGrab", "Drag grab radius (px)##DragGrab"), &g_settings.drag_grab_px, 2.0f, 60.0f, "%.0f");
         }
 
-        if (ImGui::SliderFloat("Divider position", &g_settings.split_position, 0.0f, 1.0f, "%.3f"))
+        if (ImGui::CollapsingHeader(tr("文字标签##Labels", "Labels##Labels")))
         {
-            g_auto_sweep_active = false;
-            changed = true;
+            changed |= ImGui::Checkbox(tr("显示 OFF / ON 文字##ShowLabels", "Show labels##ShowLabels"), &g_settings.show_labels);
+            changed |= ImGui::Checkbox(tr("文字位置调试预览（始终显示两边）##LabelPreview", "Label placement preview (always show both)##LabelPreview"), &g_settings.label_preview);
+            ImGui::TextWrapped("%s", tr(
+                "调试预览开启后，即使 Before/After 还没有捕获成功，也会持续显示两个标签，方便实时调整 X/Y、字号和描边。正式录制前建议关闭。",
+                "Preview keeps both labels visible even before a valid Before/After pair exists, so X/Y, size and outline can be tuned live. Disable it before normal recording."));
+            if (ImGui::InputText(tr("Before 标签文字##BeforeLabel", "Before label##BeforeLabel"), g_settings.before_text.data(), g_settings.before_text.size())) { labels_changed = changed = true; }
+            if (ImGui::InputText(tr("After 标签文字##AfterLabel", "After label##AfterLabel"), g_settings.after_text.data(), g_settings.after_text.size())) { labels_changed = changed = true; }
+            if (ImGui::InputText(tr("Windows 字体##FontName", "Windows font##FontName"), g_settings.font_name.data(), g_settings.font_name.size())) { labels_changed = changed = true; }
+            changed |= ImGui::SliderFloat(tr("Before 文字 X##BeforeX", "Before label X##BeforeX"), &g_settings.before_x, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("Before 文字 Y##BeforeY", "Before label Y##BeforeY"), &g_settings.before_y, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("After 文字 X##AfterX", "After label X##AfterX"), &g_settings.after_x, 0.0f, 1.0f, "%.3f");
+            changed |= ImGui::SliderFloat(tr("After 文字 Y##AfterY", "After label Y##AfterY"), &g_settings.after_y, 0.0f, 1.0f, "%.3f");
+            if (ImGui::SliderInt(tr("文字字号##FontSize", "Label font size##FontSize"), &g_settings.font_size_px, 8, 160)) { labels_changed = changed = true; }
+            changed |= ImGui::SliderFloat(tr("文字透明度##LabelOpacity", "Label opacity##LabelOpacity"), &g_settings.label_opacity, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::SliderFloat(tr("黑色描边##Outline", "Label outline##Outline"), &g_settings.outline_px, 0.0f, 8.0f, "%.1f px");
+            ImGui::TextDisabled("%s", tr("中文标签建议字体：Microsoft YaHei UI。", "For Chinese labels use a Windows font containing CJK glyphs, e.g. Microsoft YaHei UI."));
         }
-        changed |= ImGui::SliderFloat("Short press step", &g_settings.move_step, 0.001f, 0.20f, "%.3f");
-        changed |= ImGui::SliderFloat("Hold delay (s)", &g_settings.hold_delay, 0.0f, 1.0f, "%.2f");
-        changed |= ImGui::SliderFloat("Hold movement speed (screen/s)", &g_settings.move_speed, 0.01f, 2.0f, "%.2f");
 
-        if (ImGui::Checkbox("Auto sweep active", &g_auto_sweep_active))
+        if (ImGui::CollapsingHeader(tr("快捷键##Hotkeys", "Hotkeys##Hotkeys")))
         {
-            if (g_auto_sweep_active)
-                start_auto_sweep();
+            ImGui::TextWrapped("%s", tr("下面填写的是 Windows Virtual-Key 数值。默认值通常不需要修改。", "Values are Windows virtual-key codes. Defaults normally do not need changes."));
+            changed |= ImGui::InputInt(tr("开关对比##HKCompare", "Toggle comparison##HKCompare"), &g_settings.hk_toggle_compare);
+            changed |= ImGui::InputInt(tr("冻结/解除冻结##HKFreeze", "Toggle freeze##HKFreeze"), &g_settings.hk_toggle_freeze);
+            changed |= ImGui::InputInt(tr("开关自动扫屏##HKAuto", "Toggle auto sweep##HKAuto"), &g_settings.hk_toggle_auto);
+            changed |= ImGui::InputInt(tr("分割线向左##HKLeft", "Move divider left##HKLeft"), &g_settings.hk_left);
+            changed |= ImGui::InputInt(tr("分割线向右##HKRight", "Move divider right##HKRight"), &g_settings.hk_right);
+            changed |= ImGui::InputInt(tr("完整显示 Before##HKBefore", "Show full Before##HKBefore"), &g_settings.hk_full_before);
+            changed |= ImGui::InputInt(tr("完整显示 After##HKAfter", "Show full After##HKAfter"), &g_settings.hk_full_after);
+            ImGui::TextDisabled("F9=120, F10=121, F11=122, Left=37, Right=39, Home=36, End=35");
         }
-        changed |= ImGui::SliderFloat("Auto sweep speed", &g_settings.auto_sweep_speed, 0.01f, 2.0f, "%.2f");
-        changed |= ImGui::Checkbox("Auto sweep ping-pong", &g_settings.auto_sweep_pingpong);
-        changed |= ImGui::Checkbox("Auto sweep starts from full Before", &g_settings.auto_reset_from_before);
-        if (!g_settings.auto_reset_from_before)
+
+        if (ImGui::CollapsingHeader(tr("DLSS5 / NGX 捕获高级设置##NGX", "DLSS5 / NGX advanced capture##NGX")))
         {
-            int dir = g_settings.auto_sweep_direction;
-            if (ImGui::RadioButton("Physical direction: left -> right", dir > 0)) { g_settings.auto_sweep_direction = 1; changed = true; }
+            int max_age = static_cast<int>(g_settings.ngx_max_age_ms);
+            if (ImGui::SliderInt(tr("Feature 18 快照最大年龄（ms）##MaxAge", "Max Feature 18 snapshot age (ms)##MaxAge"), &max_age, 1, 1000))
+            {
+                g_settings.ngx_max_age_ms = static_cast<uint32_t>(max_age);
+                changed = true;
+            }
+            int d3d12_state = static_cast<int>(g_settings.d3d12_color_state);
+            if (ImGui::InputInt(tr("D3D12 Color 输入状态（位掩码）##D3D12State", "D3D12 Color input state (bitmask)##D3D12State"), &d3d12_state, 0, 0, ImGuiInputTextFlags_CharsHexadecimal))
+            {
+                g_settings.d3d12_color_state = static_cast<uint32_t>(d3d12_state);
+                changed = true;
+                sync_ngx_capture_enabled();
+            }
+            if (ImGui::Checkbox(tr("允许不安全的跨设备 NGX 导入##UnsafeCrossDevice", "Allow unsafe cross-device NGX import##UnsafeCrossDevice"), &g_settings.allow_unsafe_cross_device_ngx))
+                changed = true;
+            ImGui::TextWrapped("%s", tr(
+                "除非正在诊断使用私有 D3D12 设备的 Bridge，否则保持关闭。共享资源句柄本身不能完成跨队列同步，开启后可能得到旧帧或未定义数据。",
+                "Leave this OFF unless diagnosing a bridge with a private D3D12 device. A shared resource handle alone does not synchronize queues and may produce stale/undefined data."));
+        }
+
+        if (ImGui::CollapsingHeader(tr("诊断与日志##Diagnostics", "Diagnostics & logging##Diagnostics")))
+        {
+            changed |= ImGui::Checkbox(tr("详细日志（记录捕获来源变化等）##VerboseLog", "Verbose logging (capture-source changes, etc.)##VerboseLog"), &g_settings.verbose_logging);
+            ImGui::TextWrapped("%s", tr(
+                "插件的初始化、FrameCompare.fx 缺失、参数上传失败、NGX 错误等会写入 ReShade.log。开启详细日志后还会记录捕获来源变化和部分运行状态。",
+                "Initialization, missing FrameCompare.fx, parameter-upload failures and NGX errors are written to ReShade.log. Verbose logging also records capture-source changes and extra runtime status."));
+
+            ImGui::Separator();
+            ImGui::Text("%s: %s", tr("配置模式", "Configured mode"), capture_mode_name(g_settings.capture));
+            const std::string capture_source_display = localized_runtime_text(state->capture_source);
+            ImGui::Text("%s: %s", tr("当前捕获来源", "Current source"), capture_source_display.c_str());
+            if (!state->capture_note.empty())
+            {
+                const std::string capture_note_display = localized_runtime_text(state->capture_note);
+                ImGui::TextWrapped("%s: %s", tr("捕获说明", "Capture note"), capture_note_display.c_str());
+            }
+            ImGui::Text("%s: %s | Before %ux%u | After %ux%u", tr("画面对", "Pair"),
+                state->pair_valid ? tr("已就绪", "ready") : tr("未就绪", "not ready"),
+                state->before_width, state->before_height, state->after_width, state->after_height);
+            ImGui::Text("%s: %s | %s: %s | %s: %s",
+                tr("冻结", "Freeze"), g_frozen ? tr("已冻结", "frozen") : (g_freeze_armed ? tr("等待冻结", "armed") : tr("实时", "live")),
+                tr("扫屏", "Sweep"), g_auto_sweep_active ? tr("运行中", "active") : tr("关闭", "off"),
+                tr("文字预览", "Label preview"), g_settings.label_preview ? tr("开启", "on") : tr("关闭", "off"));
+            ImGui::Text("FrameCompare.fx: %s", state->composite != 0 ? tr("已就绪", "ready") : tr("缺失 / 未编译", "missing / not compiled"));
+            ImGui::Text("%s: %s", tr("参数上传", "Parameter upload"), state->params.available ? tr("已就绪", "ready") : tr("未初始化", "not initialized"));
+
+            const auto diag = framecompare::ngx::get_diagnostics();
+            ImGui::Text("%s: %ls", tr("NGX Hook 模块", "NGX hook module"), diag.hook_module.empty() ? L"(none)" : diag.hook_module.c_str());
+            ImGui::Text("NGX: %s %ux%u generation %llu", api_name(diag.latest_api), diag.latest_width, diag.latest_height,
+                static_cast<unsigned long long>(diag.latest_generation));
+            ImGui::Text("%s: %llu / %llu / %llu / %llu",
+                tr("Feature18 创建/执行/成功捕获/失败", "Feature18 creates/evaluates/captures/failures"),
+                static_cast<unsigned long long>(diag.feature18_creates),
+                static_cast<unsigned long long>(diag.feature18_evaluates),
+                static_cast<unsigned long long>(diag.successful_captures),
+                static_cast<unsigned long long>(diag.failed_captures));
+            ImGui::Text("Hooks D3D11 C/E/R: %d/%d/%d | D3D12 C/E/R: %d/%d/%d",
+                diag.create11_hooked, diag.eval11_hooked || diag.eval11_c_hooked, diag.release11_hooked,
+                diag.create12_hooked, diag.eval12_hooked || diag.eval12_c_hooked, diag.release12_hooked);
+            if (!diag.last_error.empty())
+                ImGui::TextWrapped("%s: %s", tr("NGX 底层错误（原始信息）", "NGX hook error"), diag.last_error.c_str());
+
+            if (!g_last_status_message.empty())
+                ImGui::TextWrapped("%s: %s", tr("最近状态", "Last status"), g_last_status_message.c_str());
+            if (!g_last_warning_message.empty())
+                ImGui::TextWrapped("%s: %s", tr("最近警告", "Last warning"), g_last_warning_message.c_str());
+            if (!g_last_error_message.empty())
+                ImGui::TextWrapped("%s: %s", tr("最近错误", "Last error"), g_last_error_message.c_str());
+        }
+
+        if (ImGui::CollapsingHeader(tr("配置文件##Config", "Configuration##Config")))
+        {
+            ImGui::TextWrapped("%s", tr(
+                "设置保存在 00-FrameCompare.addon64 同目录的 FrameCompare.ini。调好后可以把这个 INI 复制到其他游戏复用。",
+                "Settings are stored in FrameCompare.ini beside 00-FrameCompare.addon64. Copy that INI to other games to reuse your layout and hotkeys."));
+            if (ImGui::Button(tr("保存 FrameCompare.ini##SaveIni", "Save FrameCompare.ini##SaveIni")))
+                save_settings();
             ImGui::SameLine();
-            if (ImGui::RadioButton("right -> left", dir < 0)) { g_settings.auto_sweep_direction = -1; changed = true; }
-        }
-
-        changed |= ImGui::Checkbox("Show divider", &g_settings.show_border);
-        changed |= ImGui::SliderFloat("Divider width", &g_settings.border_width, 0.0f, 0.02f, "%.4f");
-        changed |= ImGui::SliderFloat("Divider opacity", &g_settings.border_opacity, 0.0f, 1.0f, "%.2f");
-        changed |= ImGui::Checkbox("Drag divider while ReShade overlay is open", &g_settings.screen_drag);
-        changed |= ImGui::SliderFloat("Drag grab radius (px)", &g_settings.drag_grab_px, 2.0f, 60.0f, "%.0f");
-
-        ImGui::SeparatorText("Labels");
-        changed |= ImGui::Checkbox("Show labels", &g_settings.show_labels);
-        changed |= ImGui::Checkbox("Label placement preview (always show both)", &g_settings.label_preview);
-        ImGui::TextWrapped("Preview mode keeps both labels visible while you tune X/Y, size and outline. It works even before a valid Before/After pair exists; when comparison is unavailable it draws over the current post-effects frame. Disable preview before normal recording.");
-        if (ImGui::InputText("Before label", g_settings.before_text.data(), g_settings.before_text.size())) { labels_changed = changed = true; }
-        if (ImGui::InputText("After label", g_settings.after_text.data(), g_settings.after_text.size())) { labels_changed = changed = true; }
-        if (ImGui::InputText("Windows font", g_settings.font_name.data(), g_settings.font_name.size())) { labels_changed = changed = true; }
-        changed |= ImGui::SliderFloat("Before label X", &g_settings.before_x, 0.0f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("Before label Y", &g_settings.before_y, 0.0f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("After label X", &g_settings.after_x, 0.0f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("After label Y", &g_settings.after_y, 0.0f, 1.0f, "%.3f");
-        if (ImGui::SliderInt("Label font size", &g_settings.font_size_px, 8, 160)) { labels_changed = changed = true; }
-        changed |= ImGui::SliderFloat("Label opacity", &g_settings.label_opacity, 0.0f, 1.0f, "%.2f");
-        changed |= ImGui::SliderFloat("Label outline", &g_settings.outline_px, 0.0f, 8.0f, "%.1f px");
-        ImGui::TextDisabled("For Chinese text, select a Windows font that contains the glyphs, e.g. Microsoft YaHei UI.");
-
-        ImGui::SeparatorText("Hotkeys (Windows virtual-key codes)");
-        changed |= ImGui::InputInt("Toggle comparison", &g_settings.hk_toggle_compare);
-        changed |= ImGui::InputInt("Toggle freeze", &g_settings.hk_toggle_freeze);
-        changed |= ImGui::InputInt("Toggle auto sweep", &g_settings.hk_toggle_auto);
-        changed |= ImGui::InputInt("Move divider left", &g_settings.hk_left);
-        changed |= ImGui::InputInt("Move divider right", &g_settings.hk_right);
-        changed |= ImGui::InputInt("Show full Before", &g_settings.hk_full_before);
-        changed |= ImGui::InputInt("Show full After", &g_settings.hk_full_after);
-        ImGui::TextDisabled("Defaults: F9=120, F10=121, F11=122, Left=37, Right=39, Home=36, End=35");
-
-        ImGui::SeparatorText("NGX / DLSS5 capture");
-        int max_age = static_cast<int>(g_settings.ngx_max_age_ms);
-        if (ImGui::SliderInt("Max Feature 18 snapshot age (ms)", &max_age, 1, 1000))
-        {
-            g_settings.ngx_max_age_ms = static_cast<uint32_t>(max_age);
-            changed = true;
-        }
-        int d3d12_state = static_cast<int>(g_settings.d3d12_color_state);
-        if (ImGui::InputInt("D3D12 Color input state (bitmask)", &d3d12_state, 0, 0, ImGuiInputTextFlags_CharsHexadecimal))
-        {
-            g_settings.d3d12_color_state = static_cast<uint32_t>(d3d12_state);
-            changed = true;
-            sync_ngx_capture_enabled();
-        }
-        if (ImGui::Checkbox("Allow unsafe cross-device NGX import", &g_settings.allow_unsafe_cross_device_ngx))
-            changed = true;
-        ImGui::TextWrapped("Leave cross-device import OFF unless diagnosing a bridge that creates a private D3D12 device. A shared resource handle alone does not provide queue synchronization; enabling this can produce stale/undefined data and is not a correctness guarantee.");
-
-        ImGui::SeparatorText("Diagnostics");
-        ImGui::Text("Configured mode: %s", capture_mode_name(g_settings.capture));
-        ImGui::Text("Current source: %s", state->capture_source.c_str());
-        if (!state->capture_note.empty())
-            ImGui::TextWrapped("Capture note: %s", state->capture_note.c_str());
-        ImGui::Text("Pair: %s | Before %ux%u | After %ux%u", state->pair_valid ? "ready" : "not ready",
-            state->before_width, state->before_height, state->after_width, state->after_height);
-        ImGui::Text("Freeze: %s | Sweep: %s | Label preview: %s", g_frozen ? "frozen" : (g_freeze_armed ? "armed" : "live"),
-            g_auto_sweep_active ? "active" : "off", g_settings.label_preview ? "on" : "off");
-        ImGui::Text("FrameCompare.fx: %s", state->composite != 0 ? "ready" : "missing / not compiled");
-        ImGui::Text("Parameter upload: %s", state->params.available ? "ready" : "not initialized");
-
-        const auto diag = framecompare::ngx::get_diagnostics();
-        ImGui::Text("NGX hook module: %ls", diag.hook_module.empty() ? L"(none)" : diag.hook_module.c_str());
-        ImGui::Text("NGX latest: %s %ux%u generation %llu", api_name(diag.latest_api), diag.latest_width, diag.latest_height,
-            static_cast<unsigned long long>(diag.latest_generation));
-        ImGui::Text("Feature18 creates/evaluates/captures/failures: %llu / %llu / %llu / %llu",
-            static_cast<unsigned long long>(diag.feature18_creates),
-            static_cast<unsigned long long>(diag.feature18_evaluates),
-            static_cast<unsigned long long>(diag.successful_captures),
-            static_cast<unsigned long long>(diag.failed_captures));
-        ImGui::Text("Hooks D3D11 C/E/R: %d/%d/%d | D3D12 C/E/R: %d/%d/%d",
-            diag.create11_hooked, diag.eval11_hooked || diag.eval11_c_hooked, diag.release11_hooked,
-            diag.create12_hooked, diag.eval12_hooked || diag.eval12_c_hooked, diag.release12_hooked);
-        if (!diag.last_error.empty())
-            ImGui::TextWrapped("NGX hook error: %s", diag.last_error.c_str());
-
-        if (ImGui::Button("Save FrameCompare.ini"))
-            save_settings();
-        ImGui::SameLine();
-        if (ImGui::Button("Reload FrameCompare.ini"))
-        {
-            load_settings();
-            state->labels_dirty = true;
-            state->pair_valid = false;
-            sync_ngx_capture_enabled();
+            if (ImGui::Button(tr("重新读取 FrameCompare.ini##ReloadIni", "Reload FrameCompare.ini##ReloadIni")))
+            {
+                load_settings();
+                state->labels_dirty = true;
+                state->pair_valid = false;
+                sync_ngx_capture_enabled();
+                fc_log(reshade::log::level::info,
+                    "已重新读取 FrameCompare.ini。",
+                    "FrameCompare.ini reloaded.");
+            }
         }
 
         if (labels_changed)
@@ -1592,12 +1868,14 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE re
     reshade::register_overlay(nullptr, draw_settings);
 
     if (!framecompare::ngx::initialize())
-        reshade::log::message(reshade::log::level::warning,
-            "FrameCompare: NGX hook initialization failed. Generic Before ReShade FX mode remains available.");
+        fc_log(reshade::log::level::warning,
+            "NGX Hook 初始化失败；仍可使用“ReShade FX 前”等通用捕获模式。",
+            "NGX hook initialization failed; generic modes such as Before ReShade FX remain available.");
     sync_ngx_capture_enabled();
 
-    reshade::log::message(reshade::log::level::info,
-        "FrameCompare: initialized. F9 compare, F10 freeze, F11 auto sweep, arrows move divider, Home/End full Before/After.");
+    fc_log(reshade::log::level::info,
+        "v1.2.0 初始化完成。F9 对比，F10 冻结，F11 自动扫屏，方向键移动分割线，Home/End 完整 Before/After。",
+        "v1.2.0 initialized. F9 compare, F10 freeze, F11 auto sweep, arrows move divider, Home/End full Before/After.");
     return true;
 }
 

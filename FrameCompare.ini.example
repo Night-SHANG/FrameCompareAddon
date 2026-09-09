@@ -1,6 +1,10 @@
-; FrameCompare v1.1 portable configuration (UTF-8)
+; FrameCompare v1.2 portable configuration (UTF-8)
 ; Copy/rename this file to FrameCompare.ini beside 00-FrameCompare.addon64.
-; The same INI can be copied to other games to reuse hotkeys, labels and divider layout.
+; The same INI can be copied to other games to reuse UI language, hotkeys, labels and divider layout.
+;
+; General.Language:
+;   0 = 中文（默认）
+;   1 = English
 ;
 ; CaptureMode:
 ;   0 = Auto: NGX Feature 18 when available, otherwise Before ReShade FX
@@ -14,6 +18,7 @@
 
 [General]
 Enabled=1
+Language=0
 CaptureMode=0
 BeforeOnLeft=1
 DisplayMode=0
@@ -35,8 +40,8 @@ DragGrabPx=14.000000
 
 [Labels]
 Show=1
-; Debug/layout mode: force both labels visible even before a valid Before/After pair exists.
-; Disable before normal recording.
+; 调试/排版模式：即使没有有效 Before/After，也强制持续显示两个标签。
+; 正常录制前建议关闭。
 Preview=0
 BeforeText=OFF
 AfterText=ON
@@ -63,7 +68,11 @@ FullAfter=35
 ; Accept only a recent NGX pre-Evaluate snapshot as belonging to the current frame.
 MaxSnapshotAgeMs=250
 ; Default is D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE (0x40).
-; Some games/bridges use another state; change this only when the D3D12 NGX capture is known to need it.
+; Some games/bridges use another state; change this only when D3D12 NGX capture is known to need it.
 D3D12ColorState=0x40
 ; Unsafe because a shared handle does not synchronize private D3D12 queues/devices.
 AllowUnsafeCrossDevice=0
+
+[Diagnostics]
+; 0 = 只记录关键初始化/警告/错误；1 = 额外记录捕获来源变化等运行信息。
+VerboseLogging=0

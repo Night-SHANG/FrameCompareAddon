@@ -26,6 +26,7 @@ jobs:
         run: |
           $pkg = "build/Release/package"
           if (!(Test-Path "$pkg/00-FrameCompare.addon64")) { throw "FrameCompare binary was not produced" }
+          if (!(Test-Path "$pkg/reshade-shaders/Shaders/FrameCompare.fx")) { throw "FrameCompare.fx package layout was not produced" }
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item "$pkg/*" artifact/ -Recurse
           Copy-Item "docs/INSTALL_CN.md" artifact/

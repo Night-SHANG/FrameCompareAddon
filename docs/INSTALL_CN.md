@@ -1,40 +1,45 @@
-# FrameCompare v1.1 安装与使用
+# FrameCompare v1.2 安装与使用
 
-## 1. 编译
+## 1. GitHub 编译
 
-最简单的方法是把整个源码目录上传到 GitHub：
+把源码上传到 GitHub 仓库的 `main` 或 `master` 分支后，`Build FrameCompare` 会自动运行。
 
-1. 创建一个仓库并上传全部文件，包括 `.github/workflows/build.yml`。
-2. 打开 GitHub 仓库的 **Actions**。
-3. 选择 **Build FrameCompare**。
-4. 点击 **Run workflow**。
-5. 构建成功后下载 Artifact：`FrameCompare-Windows-x64`。
+编译成功后：
 
-本地 Windows + VS2022 也可以直接运行 `build_vs2022.bat`。
+```text
+Actions -> Build FrameCompare -> 对应成功任务 -> Artifacts
+```
+
+下载：
+
+```text
+FrameCompare-Windows-x64
+```
 
 ## 2. 安装到游戏
 
-需要 **ReShade 6.8 Add-on 版或兼容 API 20+ 的 Add-on 版本**。
-
-把：
+v1.2 的 Artifact 已整理成正确目录：
 
 ```text
 00-FrameCompare.addon64
+FrameCompare.ini.example
+reshade-shaders\
+  Shaders\
+    FrameCompare.fx
 ```
 
-放到游戏的 ReShade Add-on 搜索目录。常见情况是游戏 EXE/ReShade DLL 所在目录；如果你已经在用 ShaderToggler、RenoDX 等 `.addon64`，与它们放在同一个实际加载目录即可。
+最简单的方法是把 Artifact 内全部内容直接合并复制到游戏 ReShade 根目录。
 
-把：
+其中：
+
+- `00-FrameCompare.addon64` 必须位于 ReShade 能扫描到 Add-on 的目录。通常与 `dxgi.dll`、ShaderToggler、RenoDX `.addon64` 在同一目录。
+- `FrameCompare.fx` 必须位于 ReShade Shader 搜索路径。默认最常见是：
 
 ```text
-FrameCompare.fx
+reshade-shaders\Shaders\FrameCompare.fx
 ```
 
-放到当前 ReShade 的 Shader 搜索目录，例如：
-
-```text
-reshade-shaders\Shaders\
-```
+如果只复制 `.addon64` 而漏掉 `.fx`，插件会注册成功，但无法显示最终对比画面。
 
 第一次可以把：
 
@@ -42,147 +47,302 @@ reshade-shaders\Shaders\
 FrameCompare.ini.example
 ```
 
-复制为：
+复制/重命名为：
 
 ```text
 FrameCompare.ini
 ```
 
-并与 `00-FrameCompare.addon64` 放在一起。插件也可以自己生成/保存 `FrameCompare.ini`。
+并与 `.addon64` 放在一起。也可以直接进游戏调参数，插件会保存自己的 INI。
 
-## 3. 默认快捷键
+## 3. 第一次进游戏怎么判断安装正常
 
-- `F9`：开启/关闭对比。
-- `F10`：冻结/解除冻结 Before + After 两张画面。不是暂停游戏。
-- `F11`：开启/关闭自动 Sweep。
-- `← / →`：短按按 Step 移动；长按超过 HoldDelay 后连续移动。
-- `Home`：完整 Before。
-- `End`：完整 After。
+打开：
 
-## 4. 分割线拖动
-
-开启 ReShade Overlay 后，可以在屏幕上的分割线附近按住鼠标左键拖动。为了避免正常游戏操作时抢鼠标，屏幕拖动默认只在 ReShade Overlay 打开时工作。
-
-## 5. DLSS5 场景如何选择 CaptureMode
-
-### A. RenoDX / 原生 Add-on 方式启动 DLSS5
-
-优先：
-
-```ini
-[General]
-CaptureMode=0
+```text
+ReShade -> Add-ons -> FrameCompare
 ```
 
-Auto 会优先使用新鲜的 NGX Feature 18 pre-Evaluate `Color`，没有可用原生捕获时退回 Before ReShade FX。
+v1.2 默认是中文 UI。
 
-确认诊断页能稳定显示 `NGX Feature 18 ... (pre-Evaluate)` 后，如果你希望绝不使用退回画面，可以改：
+先看顶部：
 
-```ini
-CaptureMode=1
+```text
+合成着色器：已就绪
 ```
+
+如果看到红色：
+
+```text
+错误：未找到 FrameCompare.fx
+```
+
+说明 `.addon64` 已加载，但 `.fx` 安装位置不对。
+
+展开：
+
+```text
+诊断与日志
+```
+
+至少应看到：
+
+```text
+FrameCompare.fx: 已就绪
+参数上传: 已就绪
+```
+
+开始对比后：
+
+```text
+画面对: 已就绪
+```
+
+## 4. 最基础的使用
+
+默认快捷键：
+
+```text
+F9    开关对比
+F10   冻结 / 解除冻结 Before + After
+F11   自动扫屏
+← →   移动分割线；短按步进，长按连续移动
+Home  完整显示 Before
+End   完整显示 After
+```
+
+推荐第一次这样测试：
+
+1. 进入一个静止场景。
+2. 按 F9 开启对比。
+3. 看中央是否出现 Before / After 分割。
+4. 按左右方向键移动分割线。
+5. 按 F10 冻结当前两张图。
+6. 按 F11 做一次自动扫屏。
+
+## 5. DLSS5 应该用哪个捕获模式
+
+### A. RenoDX / 原生 Add-on 方式 DLSS5
+
+先选：
+
+```text
+自动：NGX Feature 18 -> ReShade FX 前回退
+```
+
+插件会优先尝试 DLSS5 Neural Rendering Feature 18 Evaluate 前的 Color。
 
 ### B. DLSS5 Feeder / ReShade 效果链方式
 
-推荐：
+选：
 
-```ini
-CaptureMode=2
+```text
+ReShade FX 前
 ```
 
-这样 Before 就取 ReShade 效果链开始前的目标纹理，适合“Feeder + 后续 preset”的比较。
+这样 Before 在 ReShade 效果链开始处保存，随后 Feeder / 其他效果继续运行。
 
-### C. 不确定 / 普通游戏
+### C. 只想验证 NGX 真正工作
 
-先用 Auto。`CaptureMode=3` 的 Application Present 只作为兼容/诊断模式，它的 Add-on 调用顺序不能保证一定早于所有插件。
+选：
+
+```text
+严格 NGX Feature 18
+```
+
+如果没有新鲜有效的 Feature 18 snapshot，插件不会偷偷回退到另一阶段。
 
 ## 6. OFF / ON 文字
 
-在 Add-ons → FrameCompare 中可以修改：
+展开：
 
-- Before label / After label
-- Windows font
-- Before X / Y
-- After X / Y
-- Font size
-- Opacity
-- Outline
-
-调文字位置时可以临时开启：
-
-`Label placement preview (always show both)`
-
-开启后两个标签会持续同时显示，X/Y、字号、透明度、描边可以实时调整；即使 Before/After 还没有成功捕获，也会在当前最终画面上显示两个标签。正式录制前关闭该预览，恢复正常的分割区域裁切。
-
-INI 对应：
-
-```ini
-[Labels]
-Preview=0
-BeforeText=原版
-AfterText=DLSS 5 ON
-FontName=Microsoft YaHei UI
-BeforeX=0.04
-BeforeY=0.06
-AfterX=0.82
-AfterY=0.06
+```text
+文字标签
 ```
 
-中文需要选择包含中文字形的 Windows 字体，例如 `Microsoft YaHei UI`。
+默认：
 
-## 7. SplitScreenCR 风格
+```text
+Before = OFF
+After  = ON
+```
+
+支持：
+
+- 自定义文字。
+- Before / After 独立 X/Y。
+- Windows 字体。
+- 字号。
+- 透明度。
+- 黑色描边。
+
+### 调位置
+
+开启：
+
+```text
+文字位置调试预览（始终显示两边）
+```
+
+即使 Before / After 还没捕获成功，两个标签也会持续显示。可以一边看游戏，一边实时调整 X/Y、字号和描边。
+
+正式录制前建议关闭预览，让标签恢复只属于对应 Before / After 区域的正常裁切逻辑。
+
+中文标签建议字体：
+
+```text
+Microsoft YaHei UI
+```
+
+## 7. 分割线与自动动画
+
+展开：
+
+```text
+分割线与动画
+```
+
+可以调：
+
+- 分割位置。
+- 短按步长。
+- 长按触发延迟。
+- 长按移动速度。
+- 自动扫屏速度。
+- Ping-Pong 往返。
+- 分割线宽度 / 透明度。
+- 鼠标拖动抓取范围。
+
+ReShade Overlay 打开时，可以直接抓住分割线拖动。
+
+## 8. SplitScreenCR 风格
+
+`显示模式` 有：
+
+```text
+普通擦除
+SplitScreenCR 风格中央重映射
+```
+
+普通擦除不会压缩或拉伸两张图，两边使用同一完整屏幕坐标，更适合画质对比和视频录制。
+
+SplitScreenCR 模式参考旧 `SplitScreenCR.fx` 的中央区域重映射显示逻辑，作为可选展示模式保留。
+
+## 9. ShaderToggler / HUD
+
+FrameCompare 不会重新执行游戏 draw call。ShaderToggler 已经阻止的 HUD shader 不会因为 FrameCompare 保存 Before 而主动恢复。
+
+目标是：
+
+```text
+Before：原版画质，但继续保留 ST 的 HUD 隐藏状态
+After ：DLSS5 / RenoDX / ReShade 最终画面，同样保留 HUD 隐藏状态
+```
+
+## 10. 中文 / English
+
+UI 顶部：
+
+```text
+界面语言 / UI Language
+```
+
+可选：
+
+```text
+中文
+English
+```
+
+选择会写入 `FrameCompare.ini`：
 
 ```ini
 [General]
-DisplayMode=1
+Language=0   ; 中文
 ```
 
-这个模式保留旧 `SplitScreenCR` 使用时最明显的“左右画面中心区域重新映射”观感，而不是普通 Splitscreen 的简单同 UV 左右裁切。运行时不需要旧 shader，也不需要 `sMask.png`。
+或：
 
-## 8. ShaderToggler / HUD
+```ini
+Language=1   ; English
+```
 
-FrameCompare 不会重新执行游戏 draw call，只复制已经存在的图像资源。所以由 ShaderToggler 阻止掉的 HUD shader/draw 不会被 FrameCompare主动重新画回来。
+默认中文。
 
-但 Before 捕获点本身决定能看到什么：例如 NGX Color 很可能本来就是 HUD 之前的场景纹理；Before ReShade FX 则是进入 ReShade 时实际已有的画面。
+## 11. 折叠 UI
 
-## 9. INI 跨游戏复用
+v1.2 不再把所有参数一次性铺满页面。
 
-调好后直接复制：
+分组为：
+
+```text
+快速教程 / 使用说明
+基础设置
+分割线与动画
+文字标签
+快捷键
+DLSS5 / NGX 捕获高级设置
+诊断与日志
+配置文件
+```
+
+点击标题即可展开/收起。
+
+## 12. 日志
+
+FrameCompare 会把关键问题写入：
+
+```text
+ReShade.log
+```
+
+搜索：
+
+```text
+[FrameCompare]
+```
+
+插件 UI 的：
+
+```text
+诊断与日志
+```
+
+还会显示最近状态、最近警告、最近错误。
+
+如果需要更多运行信息，开启：
+
+```text
+详细日志
+```
+
+更多说明见 `LOG_CN.md`。
+
+## 13. INI 跨游戏复用
+
+调好后把：
 
 ```text
 FrameCompare.ini
 ```
 
-到另一个游戏的 FrameCompare Add-on 目录，即可复用快捷键、分割线、速度、标签和位置参数。
+复制到其他游戏的 `.addon64` 同目录即可复用：
 
-CaptureMode 可能需要按游戏/DLSS5接入方式单独调整，这是最主要的游戏相关参数。
+- 中文/English。
+- 快捷键。
+- 标签文字和位置。
+- 字号/描边。
+- 分割线参数。
+- Sweep 速度。
+- 捕获模式等。
 
-## 10. D3D12 NGX 出现异常时
+## 14. D3D12 NGX 高级参数
 
 默认：
 
 ```ini
-[NGX]
 D3D12ColorState=0x40
 AllowUnsafeCrossDevice=0
 ```
 
-`0x40` 对应 `D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE`。
-
-如果游戏/Bridge 的 NGX Color 在调用时处于其他状态，错误状态转换可能导致 GPU validation/花屏/崩溃。只有明确知道真实状态时才改 `D3D12ColorState`。
-
-`AllowUnsafeCrossDevice=1` 不建议常开。私有 D3D12 device/queue 与 ReShade device 之间只有共享 handle 并不能提供完整 GPU 同步，因此该功能只用于已知 Bridge 的诊断尝试。
-
-## 11. 诊断时重点看
-
-Add-ons → FrameCompare：
-
-- `Current source`
-- `Pair: ready / not ready`
-- Before / After 分辨率
-- `NGX hook module`
-- NGX latest API / resolution / generation
-- Feature18 creates / evaluates / captures / failures
-- D3D11 / D3D12 Hook 状态
-
-如果 GitHub 首次编译失败，保留完整 Actions 编译日志；如果游戏内失败，提供 ReShade.log 与 FrameCompare 诊断区截图即可定位。
+除非诊断某个特殊 Bridge，否则不要打开跨设备 NGX 导入。共享 handle 本身没有跨队列同步保证，可能得到旧帧或未定义数据。

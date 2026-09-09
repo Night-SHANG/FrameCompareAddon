@@ -1,6 +1,6 @@
 # FrameCompare 插件完整功能规格
 
-版本：v1.1 目标规格  
+版本：v1.2 目标规格  
 定位：ReShade Add-on 级 Before / After 对比、录制与展示工具
 
 ## 1. 项目目标
@@ -580,7 +580,7 @@ ReShade 自带截图的捕获时序在部分配置下可能早于 FrameCompare �
 
 ## 18. 当前平台范围
 
-v1.1 目标：
+v1.2 目标：
 
 - Windows x64。
 - ReShade Add-on API 20+。
@@ -588,7 +588,7 @@ v1.1 目标：
 - 原生 NGX Feature 18：D3D11 + D3D12。
 - Feeder / 普通效果链：使用 ReShade Before/After 捕获。
 
-Vulkan / OpenGL / D3D9 / D3D10 可以尝试通用 ReShade 捕获路径，但 v1.1 不包含原生 Vulkan NGX Feature 18 Hook。
+Vulkan / OpenGL / D3D9 / D3D10 可以尝试通用 ReShade 捕获路径，但 v1.2 不包含原生 Vulkan NGX Feature 18 Hook。
 
 ---
 
@@ -695,3 +695,76 @@ FrameCompare 的交互与视觉设计参考了旧 ReShade/SweetFX 生态中的 B
 - `SplitScreenCR` 的中心重映射观感、动态 transition、分隔线思路。
 
 FrameCompare 不是对这些 shader 的运行时依赖或源码复制，而是把其成熟交互思路提升到 ReShade Add-on 层，并加入 DLSS5/NGX 捕获、Freeze、Sweep、标签、INI、诊断等插件级功能。
+
+---
+
+## v1.2 UI、中文与日志补充
+
+### 中文 / English
+
+- 插件 UI 默认中文。
+- 顶部提供 `界面语言 / UI Language`。
+- 可选 `中文` / `English`。
+- 语言选择写入 `FrameCompare.ini`：`General.Language`。
+- 语言切换即时生效，不需要重启游戏。
+
+### 折叠 UI
+
+Add-ons 页面不再一次铺开全部参数，分组为：
+
+1. 快速教程 / 使用说明。
+2. 基础设置。
+3. 分割线与动画。
+4. 文字标签。
+5. 快捷键。
+6. DLSS5 / NGX 捕获高级设置。
+7. 诊断与日志。
+8. 配置文件。
+
+除快速教程外，其余分组默认折叠，减少页面长度。
+
+### 插件内教程
+
+快速教程必须直接说明：
+
+- `.addon64` 和 `FrameCompare.fx` 的安装位置。
+- RenoDX / 原生 DLSS5 与 Feeder 应选择哪个 CaptureMode。
+- F9/F10/F11/方向键/Home/End 的用途。
+- 如何开启文字位置调试预览。
+- 如何判断 `FrameCompare.fx`、参数上传和 Before/After Pair 是否就绪。
+- 错误应查看 `ReShade.log`。
+
+### 日志
+
+默认关键日志：
+
+- 初始化结果。
+- NGX Hook 初始化失败。
+- `FrameCompare.fx` 缺失。
+- 参数上传失败。
+- NGX 新错误。
+- INI 保存失败。
+
+可选 `Diagnostics.VerboseLogging=1`：
+
+- 记录捕获来源变化。
+- 记录额外运行状态。
+
+UI `诊断与日志` 还显示：
+
+- 最近状态。
+- 最近警告。
+- 最近错误。
+
+### FX 缺失处理
+
+如果插件本体已加载但 `FrameCompare.fx` 不在 Shader 搜索路径：
+
+- UI 顶部必须以明显红色文字提示。
+- ReShade.log 必须写入一次警告。
+- 不允许像 v1.1 一样每帧重复写同一条警告刷爆日志。
+- GitHub Artifact 必须直接包含 `reshade-shaders/Shaders/FrameCompare.fx` 的正确目录结构。
+
+### 版本显示
+
+v1.2 增加 Windows VERSIONINFO，目标是在 ReShade 加载日志中显示 `v1.2.0.0`，而不是旧版本的 `v0.0.0.0`。

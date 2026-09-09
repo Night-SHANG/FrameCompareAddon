@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(FrameCompare VERSION 1.1.0 LANGUAGES C CXX)
+project(FrameCompare VERSION 1.2.0 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "FrameCompare is a Windows ReShade add-on and must be built with a Windows toolchain.")
 endif()
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "FrameCompare v1.1 currently targets 64-bit ReShade only.")
+    message(FATAL_ERROR "FrameCompare v1.2 currently targets 64-bit ReShade only.")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -62,6 +62,7 @@ add_library(FrameCompare SHARED
     src/NgxHook.cpp
     src/NgxHook.hpp
     src/NgxAbi.hpp
+    src/FrameCompare.rc
 )
 
 target_include_directories(FrameCompare PRIVATE
@@ -99,11 +100,13 @@ set_target_properties(FrameCompare PROPERTIES
 
 add_custom_command(TARGET FrameCompare POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:FrameCompare>/package"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:FrameCompare>/package/reshade-shaders/Shaders"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:FrameCompare>" "$<TARGET_FILE_DIR:FrameCompare>/package/00-FrameCompare.addon64"
-    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/shaders/FrameCompare.fx" "$<TARGET_FILE_DIR:FrameCompare>/package/FrameCompare.fx"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/shaders/FrameCompare.fx" "$<TARGET_FILE_DIR:FrameCompare>/package/reshade-shaders/Shaders/FrameCompare.fx"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/FrameCompare.ini.example" "$<TARGET_FILE_DIR:FrameCompare>/package/FrameCompare.ini.example"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/README.md" "$<TARGET_FILE_DIR:FrameCompare>/package/README.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/INSTALL_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/INSTALL_CN.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/FUNCTIONS_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/FUNCTIONS_CN.md"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/docs/LOG_CN.md" "$<TARGET_FILE_DIR:FrameCompare>/package/LOG_CN.md"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md" "$<TARGET_FILE_DIR:FrameCompare>/package/THIRD_PARTY.md"
 )

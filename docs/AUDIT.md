@@ -1,6 +1,6 @@
-# FrameCompare v1.1 static audit
+# FrameCompare v1.2 static audit
 
-Audit date: 2026-09-08
+Audit date: 2026-09-09
 
 This source package was statically reviewed in a Linux container. The container does not provide the Windows SDK/MSVC/ReShade runtime, so this document deliberately distinguishes source/API review from an actual Windows build or in-game test.
 
@@ -37,7 +37,7 @@ This source package was statically reviewed in a Linux container. The container 
 2. A Feature-18 `Color` input can be an internal resolution/intermediate. It is pre-Evaluate, but not universally equivalent to uninstalling all enhancement components and re-rendering the game.
 3. D3D12 resource state cannot be universally queried from an arbitrary application resource, so `NGX.D3D12ColorState` is configurable.
 4. Add-on callback/hook ordering between independently injected components cannot be universally forced. `00-` naming is only a best-effort load-order aid.
-5. Native Vulkan NGX Feature-18 interception is not implemented in v1.1; generic ReShade capture modes remain available.
+5. Native Vulkan NGX Feature-18 interception is not implemented in v1.2; generic ReShade capture modes remain available.
 6. ReShade's own screenshot capture may occur before this late composite; external recording is preferred.
 
 ## Validation still requiring Windows
@@ -52,3 +52,31 @@ This source package was statically reviewed in a Linux container. The container 
 - Label preview live-positioning test, including preview before a valid Before/After pair exists.
 
 The GitHub Actions workflow is included specifically to perform the first Windows compile without requiring a local development setup.
+
+## v1.2 审查补充
+
+### 用户测试日志确认的问题
+
+用户测试的 v1.1 Add-on 能被 ReShade 6.8 / API 20 成功注册，但 `FrameCompare.fx / FrameCompareComposite` 没有找到。由于 `refresh_effect_handles` 在每次查找失败时都会把 `warned_missing_fx` 重置，导致相同 WARN 逐帧写入日志。
+
+v1.2 修正：
+
+- 查找失败后保持一次性警告状态。
+- 只有 ReShade 重新加载 effects 时才允许再次报告缺失。
+- 当 `.fx` 后续真正被找到时清除缺失状态。
+- UI 顶部增加中文/英文即时错误提示。
+- Build Artifact 改为 `reshade-shaders/Shaders/FrameCompare.fx` 目录。
+
+### UI
+
+- 默认中文。
+- `Language=0/1` 双语切换。
+- 使用 Dear ImGui 官方 C++ API，不采用旧 C 插件手工调用 ImGui function table 的 ABI 方式。
+- 大型设置页改为 `CollapsingHeader` 分组。
+- 文字位置预览继续使用正式 GPU glyph texture compositor，不切换到另一套临时 OSD 渲染路径。
+
+### 日志
+
+- 关键问题始终写 ReShade.log。
+- 捕获来源变化等高频信息仅在 VerboseLogging 开启时写入。
+- NGX `last_error` 只在内容变化时记录，避免重复刷屏。
