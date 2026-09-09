@@ -1,0 +1,41 @@
+name: Build FrameCompare
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout FrameCompare
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Assemble artifact
+        shell: pwsh
+        run: |
+          $pkg = "build/Release/package"
+          if (!(Test-Path "$pkg/00-FrameCompare.addon64")) { throw "FrameCompare binary was not produced" }
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item "$pkg/*" artifact/ -Recurse
+          Copy-Item "docs/INSTALL_CN.md" artifact/
+          Copy-Item "docs/FUNCTIONS_CN.md" artifact/
+          Copy-Item "THIRD_PARTY.md" artifact/
+          Get-FileHash artifact/00-FrameCompare.addon64 -Algorithm SHA256 | Format-List | Out-File artifact/SHA256.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrameCompare-Windows-x64
+          path: artifact
+          if-no-files-found: error

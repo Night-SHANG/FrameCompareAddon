@@ -1,0 +1,69 @@
+; FrameCompare v1.1 portable configuration (UTF-8)
+; Copy/rename this file to FrameCompare.ini beside 00-FrameCompare.addon64.
+; The same INI can be copied to other games to reuse hotkeys, labels and divider layout.
+;
+; CaptureMode:
+;   0 = Auto: NGX Feature 18 when available, otherwise Before ReShade FX
+;   1 = NGX Feature 18 strict (D3D11/D3D12 pre-Evaluate Color)
+;   2 = Before ReShade FX (recommended for DLSS5 Feeder/effect-chain injection)
+;   3 = Application Present hook (generic, ordering-dependent)
+;
+; DisplayMode:
+;   0 = Normal wipe (same UV on both sides)
+;   1 = SplitScreenCR-style center remap
+
+[General]
+Enabled=1
+CaptureMode=0
+BeforeOnLeft=1
+DisplayMode=0
+
+[Divider]
+Position=0.500000
+Step=0.020000
+HoldDelay=0.250000
+MoveSpeed=0.250000
+AutoSweepSpeed=0.200000
+AutoSweepPingPong=0
+AutoResetFromBefore=1
+AutoSweepDirection=1
+ShowBorder=1
+BorderWidth=0.002000
+BorderOpacity=1.000000
+ScreenDrag=1
+DragGrabPx=14.000000
+
+[Labels]
+Show=1
+; Debug/layout mode: force both labels visible even before a valid Before/After pair exists.
+; Disable before normal recording.
+Preview=0
+BeforeText=OFF
+AfterText=ON
+FontName=Segoe UI
+BeforeX=0.040000
+BeforeY=0.060000
+AfterX=0.880000
+AfterY=0.060000
+FontSizePx=42
+Opacity=1.000000
+OutlinePx=1.500000
+
+[Hotkeys]
+; Windows virtual-key codes: F9=120, F10=121, F11=122, Left=37, Right=39, Home=36, End=35
+ToggleCompare=120
+ToggleFreeze=121
+ToggleAutoSweep=122
+MoveLeft=37
+MoveRight=39
+FullBefore=36
+FullAfter=35
+
+[NGX]
+; Accept only a recent NGX pre-Evaluate snapshot as belonging to the current frame.
+MaxSnapshotAgeMs=250
+; Default is D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE (0x40).
+; Some games/bridges use another state; change this only when the D3D12 NGX capture is known to need it.
+D3D12ColorState=0x40
+; Unsafe because a shared handle does not synchronize private D3D12 queues/devices.
+AllowUnsafeCrossDevice=0
