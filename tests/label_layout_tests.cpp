@@ -103,6 +103,28 @@ void label_regions_follow_and_clamp_the_split_boundary()
                 near(beyond_left.right_min_x, 0.0f),
             "label regions should clamp a split beyond the left edge");
 }
+
+void labels_keep_text_and_outline_inside_the_viewport()
+{
+    framecompare::ui::ResolvedLabel left;
+    left.x = 0.0f;
+    left.y = 0.0f;
+    const auto left_position = framecompare::ui::place_label(
+        left, 100.0f, 40.0f, 1567.0f, 881.0f, 14.0f);
+    require(near(left_position[0], 14.0f) &&
+                near(left_position[1], 14.0f),
+            "top-left label should keep its safe margin");
+
+    framecompare::ui::ResolvedLabel right;
+    right.x = 1.0f;
+    right.y = 0.0f;
+    right.align_right = true;
+    const auto right_position = framecompare::ui::place_label(
+        right, 100.0f, 40.0f, 1567.0f, 881.0f, 14.0f);
+    require(near(right_position[0], 1453.0f) &&
+                near(right_position[1], 14.0f),
+            "top-right label should keep its safe margin");
+}
 }
 
 int main()
@@ -111,5 +133,6 @@ int main()
     layout_values_are_safe_for_the_viewport();
     positions_can_be_mirrored_in_both_directions();
     label_regions_follow_and_clamp_the_split_boundary();
+    labels_keep_text_and_outline_inside_the_viewport();
     std::cout << "label_layout_tests: PASS\n";
 }

@@ -50,22 +50,19 @@ void draw_one_label(ImDrawList *draw_list, const ResolvedLabel &label,
     text_size.x *= font_scale;
     text_size.y *= font_scale;
 
-    ImVec2 position(label.x * display_size.x, label.y * display_size.y);
-    if (label.align_right)
-        position.x -= text_size.x;
-    position.x = std::clamp(position.x, 0.0f,
-                            std::max(display_size.x - text_size.x, 0.0f));
-    position.y = std::clamp(position.y, 0.0f,
-                            std::max(display_size.y - text_size.y, 0.0f));
+    const float outline = layout.outline_width;
+    const auto placement = place_label(
+        label, text_size.x, text_size.y, display_size.x, display_size.y,
+        12.0f + outline);
+    const ImVec2 position(placement[0], placement[1]);
 
-    if (layout.outline_width > 0.0f && layout.outline_opacity > 0.0f)
+    if (outline > 0.0f && layout.outline_opacity > 0.0f)
     {
         const ImU32 outline_color = black_with_alpha(layout.outline_opacity);
-        const float offset = layout.outline_width;
         const ImVec2 offsets[] = {
-            {-offset, -offset}, {0.0f, -offset}, {offset, -offset},
-            {-offset, 0.0f},                       {offset, 0.0f},
-            {-offset, offset},  {0.0f, offset},  {offset, offset}};
+            {-outline, -outline}, {0.0f, -outline}, {outline, -outline},
+            {-outline, 0.0f},                         {outline, 0.0f},
+            {-outline, outline},  {0.0f, outline},  {outline, outline}};
         for (const ImVec2 &outline_offset : offsets)
         {
             draw_list->AddText(ImGui::GetFont(), layout.font_size,

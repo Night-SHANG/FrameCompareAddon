@@ -52,6 +52,9 @@ struct LabelClipRegions
 ResolvedLabels resolve_labels(const LabelSettings &settings,
                               bool before_on_left) noexcept;
 LabelClipRegions resolve_label_clip_regions(float split_position) noexcept;
+std::array<float, 2> place_label(
+    const ResolvedLabel &label, float text_width, float text_height,
+    float display_width, float display_height, float safe_margin) noexcept;
 void mirror_left_to_right(LabelSettings &settings) noexcept;
 void mirror_right_to_left(LabelSettings &settings) noexcept;
 }

@@ -34,6 +34,28 @@ LabelClipRegions resolve_label_clip_regions(float split_position) noexcept
     return {0.0f, split, split, 1.0f};
 }
 
+std::array<float, 2> place_label(
+    const ResolvedLabel &label, float text_width, float text_height,
+    float display_width, float display_height, float safe_margin) noexcept
+{
+    const float width = std::max(text_width, 0.0f);
+    const float height = std::max(text_height, 0.0f);
+    const float screen_width = std::max(display_width, 0.0f);
+    const float screen_height = std::max(display_height, 0.0f);
+    const float max_x = std::max(screen_width - width, 0.0f);
+    const float max_y = std::max(screen_height - height, 0.0f);
+    const float inset_x = std::clamp(safe_margin, 0.0f, max_x * 0.5f);
+    const float inset_y = std::clamp(safe_margin, 0.0f, max_y * 0.5f);
+    const float anchored_x =
+        std::clamp(label.x, 0.0f, 1.0f) * screen_width -
+        (label.align_right ? width : 0.0f);
+    const float anchored_y =
+        std::clamp(label.y, 0.0f, 1.0f) * screen_height;
+    return {
+        std::clamp(anchored_x, inset_x, max_x - inset_x),
+        std::clamp(anchored_y, inset_y, max_y - inset_y)};
+}
+
 void mirror_left_to_right(LabelSettings &settings) noexcept
 {
     const float left_x = std::clamp(settings.left_x, 0.0f, 1.0f);
