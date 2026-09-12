@@ -72,7 +72,7 @@ require_include_before(
 require_include_before(
     "src/input/hotkeys.cpp",
     "#include <imgui.h>",
-    '#include "input/hotkeys.hpp"',
+    "#include <reshade.hpp>",
 )
 
 for folder in (ROOT / "src").iterdir():

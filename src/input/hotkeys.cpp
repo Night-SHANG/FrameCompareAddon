@@ -1,4 +1,5 @@
 #include <imgui.h>
+#include <reshade.hpp>
 
 #include "input/hotkeys.hpp"
 
