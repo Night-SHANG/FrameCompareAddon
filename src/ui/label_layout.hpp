@@ -43,4 +43,6 @@ struct ResolvedLabels
 
 ResolvedLabels resolve_labels(const LabelSettings &settings,
                               bool before_on_left) noexcept;
+void mirror_left_to_right(LabelSettings &settings) noexcept;
+void mirror_right_to_left(LabelSettings &settings) noexcept;
 }

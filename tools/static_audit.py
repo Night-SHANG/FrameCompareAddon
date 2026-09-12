@@ -24,6 +24,8 @@ REQUIRED = (
     "src/ui/label_layout.cpp",
     "src/ui/label_overlay.hpp",
     "src/ui/label_overlay.cpp",
+    "src/ui/parameter_widgets.hpp",
+    "src/ui/parameter_widgets.cpp",
     "src/ui/panel.hpp",
     "src/ui/panel.cpp",
     "tests/label_layout_tests.cpp",
@@ -74,6 +76,11 @@ require_include_before(
     "#include <imgui.h>",
     "#include <reshade.hpp>",
 )
+require_include_before(
+    "src/ui/parameter_widgets.cpp",
+    "#include <imgui.h>",
+    "#include <reshade.hpp>",
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
@@ -91,6 +98,8 @@ if "CaptureProvenance::pre_reshade_fx" not in capture_source:
 panel_source = (ROOT / "src/ui/panel.cpp").read_text(encoding="utf-8")
 if "not verified Vanilla" not in panel_source:
     fail("panel does not disclose the generic Before limitation")
+if "mirror_left_to_right" not in panel_source or "mirror_right_to_left" not in panel_source:
+    fail("panel is missing two-way label position mirroring")
 
 entry_source = (ROOT / "src/addon_entry.cpp").read_text(encoding="utf-8")
 if 'register_overlay("OSD", framecompare::ui::draw_labels)' not in entry_source:
@@ -105,6 +114,13 @@ if "'O', 'F', 'F'" not in label_header or "'O', 'N'" not in label_header:
 hotkey_header = (ROOT / "src/input/hotkeys.hpp").read_text(encoding="utf-8")
 if "ImGuiKeyChord" not in hotkey_header or "ImGuiKey_LeftArrow" not in hotkey_header:
     fail("hotkeys must use direct named-key chords rather than numeric VK input")
+
+widget_source = (ROOT / "src/ui/parameter_widgets.cpp").read_text(
+    encoding="utf-8"
+)
+for required_widget in ("SliderFloat", "InputFloat", "重置 / Reset"):
+    if required_widget not in widget_source:
+        fail("numeric settings must provide slider, number input and reset")
 
 shader_source = (ROOT / "shaders/FrameCompare.fx").read_text(encoding="utf-8")
 if "FRAMECOMPARE_BEFORE" not in shader_source or "FRAMECOMPARE_AFTER" not in shader_source:

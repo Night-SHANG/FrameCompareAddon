@@ -27,4 +27,18 @@ ResolvedLabels resolve_labels(const LabelSettings &settings,
         settings.outline_opacity, 0.0f, 1.0f);
     return result;
 }
+
+void mirror_left_to_right(LabelSettings &settings) noexcept
+{
+    const float left_x = std::clamp(settings.left_x, 0.0f, 1.0f);
+    settings.right_x = 1.0f - left_x;
+    settings.right_y = std::clamp(settings.left_y, 0.0f, 1.0f);
+}
+
+void mirror_right_to_left(LabelSettings &settings) noexcept
+{
+    const float right_x = std::clamp(settings.right_x, 0.0f, 1.0f);
+    settings.left_x = 1.0f - right_x;
+    settings.left_y = std::clamp(settings.right_y, 0.0f, 1.0f);
+}
 }

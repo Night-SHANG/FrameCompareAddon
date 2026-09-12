@@ -65,6 +65,7 @@ if(FRAMECOMPARE_BUILD_ADDON)
         src/input/hotkeys.cpp
         src/render/compositor.cpp
         src/ui/label_overlay.cpp
+        src/ui/parameter_widgets.cpp
         src/ui/panel.cpp
     )
     target_include_directories(FrameCompareV2 PRIVATE
