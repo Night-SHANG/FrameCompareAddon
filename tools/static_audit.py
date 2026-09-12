@@ -193,6 +193,8 @@ for requirement in (".addon32", ".addon64", "CMAKE_SIZEOF_VOID_P"):
         fail(f"dual-architecture CMake packaging is missing {requirement}")
 
 workflow_source = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+if workflow_source.count("uses: actions/checkout@v4") < 2:
+    fail("build and release jobs must each checkout the repository")
 for requirement in ("Win32", "x64", '"v*.*.*"', "contents: write",
                     "needs: windows", "gh release create", "SHA256SUMS.txt"):
     if requirement not in workflow_source:
