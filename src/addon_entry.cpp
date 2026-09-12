@@ -1,3 +1,5 @@
+#include <imgui.h>
+
 #include "capture/reshade_capture.hpp"
 #include "render/compositor.hpp"
 #include "ui/panel.hpp"

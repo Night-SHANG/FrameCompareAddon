@@ -28,9 +28,28 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def require_include_before(path: str, first: str, second: str) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    first_index = source.find(first)
+    second_index = source.find(second)
+    if first_index < 0 or second_index < 0 or first_index > second_index:
+        fail(f"{path} must include {first} before {second}")
+
+
 for relative in REQUIRED:
     if not (ROOT / relative).is_file():
         fail(f"missing {relative}")
+
+require_include_before(
+    "src/addon_entry.cpp",
+    "#include <imgui.h>",
+    '#include "capture/reshade_capture.hpp"',
+)
+require_include_before(
+    "src/ui/panel.cpp",
+    "#include <imgui.h>",
+    '#include "ui/panel.hpp"',
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():

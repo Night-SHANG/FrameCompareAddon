@@ -1,9 +1,9 @@
+#include <imgui.h>
+
 #include "ui/panel.hpp"
 
 #include "capture/reshade_capture.hpp"
 #include "render/compositor.hpp"
-
-#include <imgui.h>
 
 namespace framecompare::ui
 {
