@@ -35,6 +35,7 @@ public:
 private:
     MotionSettings settings_;
     int ping_pong_direction_ = 1;
+    bool returning_to_center_ = false;
 };
 
 SplitMotionController &split_motion() noexcept;

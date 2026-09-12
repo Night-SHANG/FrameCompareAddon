@@ -144,5 +144,13 @@ for required_widget in ("SliderFloat", "InputFloat", "重置 / Reset"):
 shader_source = (ROOT / "shaders/FrameCompare.fx").read_text(encoding="utf-8")
 if "FRAMECOMPARE_BEFORE" not in shader_source or "FRAMECOMPARE_AFTER" not in shader_source:
     fail("shader is missing Before/After bindings")
+if "center_focus" not in shader_source or "p1.w" not in shader_source:
+    fail("center-remap shader is missing the adjustable source focus")
+
+compositor_header = (ROOT / "src/render/compositor_params.hpp").read_text(
+    encoding="utf-8"
+)
+if compositor_header.count("center_focus") < 2:
+    fail("center focus must exist in settings and uploaded shader parameters")
 
 print("static_audit: PASS")

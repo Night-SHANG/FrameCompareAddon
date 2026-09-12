@@ -16,6 +16,7 @@ struct CompositorSettings
     bool before_on_left = true;
     bool show_border = true;
     float split_position = 0.5f;
+    float center_focus = 0.5f;
     float border_width = 0.002f;
     float border_opacity = 1.0f;
     DisplayMode display_mode = DisplayMode::same_coordinate_wipe;
@@ -30,7 +31,7 @@ struct ShaderParams
     float before_on_left = 1.0f;
     float display_mode = 0.0f;
     float pair_ready = 0.0f;
-    float reserved = 0.0f;
+    float center_focus = 0.5f;
 };
 
 ShaderParams make_shader_params(const CompositorSettings &settings,

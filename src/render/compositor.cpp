@@ -88,7 +88,7 @@ bool upload_parameters(effect_runtime *runtime, RuntimeCompositorState *state,
         params.split_position, params.border_width,
         params.border_opacity, params.show_border,
         params.before_on_left, params.display_mode,
-        params.pair_ready, params.reserved};
+        params.pair_ready, params.center_focus};
 
     if (state->parameters.shader_resource_state)
         commands->barrier(state->parameters.resource,

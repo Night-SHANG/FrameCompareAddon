@@ -29,6 +29,14 @@ void draw_panel(reshade::api::effect_runtime *runtime)
         "中心偏移 / Center remap"};
     if (ImGui::Combo("显示方式 / Display mode", &mode, modes, 2))
         settings.display_mode = static_cast<render::DisplayMode>(mode);
+    if (settings.display_mode == render::DisplayMode::center_remap)
+    {
+        numeric_setting("中心取景位置 / Center focus", settings.center_focus,
+                        0.0f, 1.0f, compositor_defaults.center_focus, "%.3f");
+        ImGui::TextDisabled(
+            "中心偏移适合固定对比，不推荐配合自动扫屏。"
+            " / Center remap is not recommended for autosweep.");
+    }
 
     ImGui::Checkbox("显示分割线 / Show border", &settings.show_border);
     numeric_setting("线宽 / Border width", settings.border_width,

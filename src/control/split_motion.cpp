@@ -24,16 +24,28 @@ void SplitMotionController::start(SweepMode mode, float &position) noexcept
     settings_.sweep_mode = mode;
     settings_.auto_active = true;
     ping_pong_direction_ = 1;
+    returning_to_center_ = false;
 
     if (mode == SweepMode::right_to_left)
         position = 1.0f;
+    else if (mode == SweepMode::ping_pong)
+        position = 0.5f;
     else
         position = 0.0f;
 }
 
 void SplitMotionController::stop(float &position) noexcept
 {
+    position = std::clamp(position, 0.0f, 1.0f);
+    if (settings_.sweep_mode == SweepMode::ping_pong &&
+        settings_.auto_active && position != 0.5f)
+    {
+        returning_to_center_ = true;
+        return;
+    }
+
     settings_.auto_active = false;
+    returning_to_center_ = false;
     position = 0.5f;
 }
 
@@ -54,6 +66,7 @@ void SplitMotionController::update(float &position, float delta_seconds,
     if (move_left || move_right)
     {
         settings_.auto_active = false;
+        returning_to_center_ = false;
         const int direction = static_cast<int>(move_right) -
                               static_cast<int>(move_left);
         const float speed = std::max(settings_.manual_speed, 0.0f);
@@ -67,6 +80,19 @@ void SplitMotionController::update(float &position, float delta_seconds,
         return;
 
     const float step = std::max(settings_.auto_speed, 0.0f) * delta;
+    if (returning_to_center_)
+    {
+        position = position < 0.5f
+            ? std::min(position + step, 0.5f)
+            : std::max(position - step, 0.5f);
+        if (position == 0.5f)
+        {
+            settings_.auto_active = false;
+            returning_to_center_ = false;
+        }
+        return;
+    }
+
     switch (settings_.sweep_mode)
     {
     case SweepMode::left_to_right:

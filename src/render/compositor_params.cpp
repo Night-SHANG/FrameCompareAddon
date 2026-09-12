@@ -15,6 +15,7 @@ ShaderParams make_shader_params(const CompositorSettings &settings,
     result.before_on_left = settings.before_on_left ? 1.0f : 0.0f;
     result.display_mode = static_cast<float>(settings.display_mode);
     result.pair_ready = settings.enabled && pair_ready ? 1.0f : 0.0f;
+    result.center_focus = std::clamp(settings.center_focus, 0.0f, 1.0f);
     return result;
 }
 

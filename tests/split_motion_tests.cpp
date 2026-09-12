@@ -1,5 +1,6 @@
 #include "control/split_motion.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 
@@ -12,6 +13,11 @@ void require(bool condition, const char *message)
         std::cerr << "FAILED: " << message << '\n';
         std::exit(1);
     }
+}
+
+bool near(float left, float right)
+{
+    return std::fabs(left - right) < 0.0001f;
 }
 
 void held_manual_input_moves_smoothly_and_stops_auto()
@@ -60,8 +66,8 @@ void ping_pong_reverses_at_both_edges()
     float position = 0.7f;
 
     controller.start(framecompare::control::SweepMode::ping_pong, position);
-    require(position == 0.0f, "ping-pong should begin at the left edge");
-    controller.update(position, 1.25f, false, false);
+    require(position == 0.5f, "ping-pong should begin at the center");
+    controller.update(position, 0.75f, false, false);
     require(position == 0.75f && controller.settings().auto_active,
             "ping-pong should reflect overshoot at the right edge");
     controller.update(position, 1.0f, false, false);
@@ -69,7 +75,34 @@ void ping_pong_reverses_at_both_edges()
             "ping-pong should reflect again at the left edge");
 }
 
-void explicit_stop_restores_the_center_position()
+void ping_pong_stop_animates_back_to_the_center()
+{
+    framecompare::control::SplitMotionController controller;
+    controller.settings().auto_speed = 0.2f;
+    float position = 0.1f;
+
+    controller.start(framecompare::control::SweepMode::ping_pong,
+                     position);
+    require(position == 0.5f,
+            "ping-pong start should not jump from the center to an edge");
+    controller.update(position, 1.0f, false, false);
+    require(near(position, 0.7f) && controller.settings().auto_active,
+            "sweep should be active away from the center before stopping");
+
+    controller.toggle(position);
+    require(position == 0.7f,
+            "ping-pong stop should not jump immediately to the center");
+    require(controller.settings().auto_active,
+            "ping-pong should remain active while returning to center");
+    controller.update(position, 0.5f, false, false);
+    require(near(position, 0.6f) && controller.settings().auto_active,
+            "return should use the configured automatic speed");
+    controller.update(position, 0.5f, false, false);
+    require(position == 0.5f && !controller.settings().auto_active,
+            "return should stop exactly at the center");
+}
+
+void one_way_stop_still_returns_to_center_immediately()
 {
     framecompare::control::SplitMotionController controller;
     controller.settings().auto_speed = 0.2f;
@@ -78,14 +111,10 @@ void explicit_stop_restores_the_center_position()
     controller.start(framecompare::control::SweepMode::left_to_right,
                      position);
     controller.update(position, 1.0f, false, false);
-    require(position == 0.2f && controller.settings().auto_active,
-            "sweep should be active away from the center before stopping");
-
     controller.toggle(position);
-    require(position == 0.5f,
-            "explicit sweep stop should restore the center position");
-    require(!controller.settings().auto_active,
-            "explicit sweep stop should deactivate automatic motion");
+
+    require(position == 0.5f && !controller.settings().auto_active,
+            "one-way sweep stop should retain immediate center reset");
 }
 
 void freeze_reuses_a_ready_pair_but_can_create_the_first_pair()
@@ -104,7 +133,8 @@ int main()
     held_manual_input_moves_smoothly_and_stops_auto();
     one_way_sweeps_start_at_an_edge_and_stop_at_the_other();
     ping_pong_reverses_at_both_edges();
-    explicit_stop_restores_the_center_position();
+    ping_pong_stop_animates_back_to_the_center();
+    one_way_stop_still_returns_to_center_immediately();
     freeze_reuses_a_ready_pair_but_can_create_the_first_pair();
     std::cout << "split_motion_tests: PASS\n";
 }

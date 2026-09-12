@@ -21,6 +21,7 @@ int main()
     settings.split_position = -0.25f;
     settings.border_width = -3.0f;
     settings.border_opacity = 2.0f;
+    settings.center_focus = -0.25f;
 
     const auto unavailable = framecompare::render::make_shader_params(settings, false);
     require(unavailable.split_position == 0.0f,
@@ -29,15 +30,20 @@ int main()
             "border width must not be negative");
     require(unavailable.border_opacity == 1.0f,
             "border opacity should clamp to one");
+    require(unavailable.center_focus == 0.0f,
+            "center focus should clamp to the left edge");
     require(unavailable.pair_ready == 0.0f,
             "composition must stay disabled without a ready pair");
 
     settings.split_position = 1.25f;
+    settings.center_focus = 1.25f;
     const auto ready = framecompare::render::make_shader_params(settings, true);
     require(ready.split_position == 1.0f,
             "split position should clamp to the right edge");
     require(ready.pair_ready == 1.0f,
             "a ready pair should enable composition");
+    require(ready.center_focus == 1.0f,
+            "center focus should clamp to the right edge");
 
     require(!framecompare::render::toggle_enabled(settings),
             "comparison toggle should report the disabled state");
