@@ -72,41 +72,17 @@ cmake_source = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
 if "set(CMAKE_MSVC_RUNTIME_LIBRARY" not in cmake_source:
     fail("CMake must select one MSVC runtime library for every target")
 
-require_include_before(
-    "src/addon_entry.cpp",
-    "#include <imgui.h>",
-    '#include "capture/reshade_capture.hpp"',
+include_order_requirements = (
+    ("src/addon_entry.cpp", "#include <imgui.h>", '#include "capture/reshade_capture.hpp"'),
+    ("src/ui/panel.cpp", "#include <imgui.h>", '#include "ui/panel.hpp"'),
+    ("src/ui/label_overlay.cpp", "#include <imgui.h>", '#include "ui/label_overlay.hpp"'),
+    ("src/input/hotkeys.cpp", "#include <imgui.h>", "#include <reshade.hpp>"),
+    ("src/ui/parameter_widgets.cpp", "#include <imgui.h>", "#include <reshade.hpp>"),
+    ("src/hud/indicator_overlay.cpp", "#include <imgui.h>", '#include "hud/indicator_overlay.hpp"'),
+    ("src/hud/indicator_panel.cpp", "#include <imgui.h>", "#include <reshade.hpp>"),
 )
-require_include_before(
-    "src/ui/panel.cpp",
-    "#include <imgui.h>",
-    '#include "ui/panel.hpp"',
-)
-require_include_before(
-    "src/ui/label_overlay.cpp",
-    "#include <imgui.h>",
-    '#include "ui/label_overlay.hpp"',
-)
-require_include_before(
-    "src/input/hotkeys.cpp",
-    "#include <imgui.h>",
-    "#include <reshade.hpp>",
-)
-require_include_before(
-    "src/ui/parameter_widgets.cpp",
-    "#include <imgui.h>",
-    "#include <reshade.hpp>",
-)
-require_include_before(
-    "src/hud/indicator_overlay.cpp",
-    "#include <imgui.h>",
-    '#include "hud/indicator_overlay.hpp"',
-)
-require_include_before(
-    "src/hud/indicator_panel.cpp",
-    "#include <imgui.h>",
-    "#include <reshade.hpp>",
-)
+for requirement in include_order_requirements:
+    require_include_before(*requirement)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
