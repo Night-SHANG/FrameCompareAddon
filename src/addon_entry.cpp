@@ -1,0 +1,98 @@
+#include "capture/reshade_capture.hpp"
+#include "render/compositor.hpp"
+#include "ui/panel.hpp"
+
+#include <Windows.h>
+#include <reshade.hpp>
+
+#if !defined(RESHADE_API_VERSION) || RESHADE_API_VERSION < 20
+#error "FrameCompare v2 requires ReShade Add-on API 20 or newer."
+#endif
+
+extern "C" __declspec(dllexport) const char *NAME = "FrameCompare v2";
+extern "C" __declspec(dllexport) const char *AUTHOR = "Night Shang";
+extern "C" __declspec(dllexport) const char *DESCRIPTION =
+    "Same-frame realtime Before/After comparison with explicit capture provenance.";
+
+namespace
+{
+void on_init_runtime(reshade::api::effect_runtime *runtime)
+{
+    framecompare::capture::on_init_runtime(runtime);
+    framecompare::render::on_init_runtime(runtime);
+}
+
+void on_destroy_runtime(reshade::api::effect_runtime *runtime)
+{
+    framecompare::render::on_destroy_runtime(runtime);
+    framecompare::capture::on_destroy_runtime(runtime);
+}
+
+void on_reloaded_effects(reshade::api::effect_runtime *runtime)
+{
+    framecompare::capture::on_reloaded_effects(runtime);
+    framecompare::render::on_reloaded_effects(runtime);
+}
+
+void on_begin_effects(reshade::api::effect_runtime *runtime,
+                      reshade::api::command_list *commands,
+                      reshade::api::resource_view target,
+                      reshade::api::resource_view target_srgb)
+{
+    framecompare::render::prepare_cycle(runtime);
+    if (framecompare::render::settings().enabled)
+        framecompare::capture::on_begin_effects(runtime, commands, target,
+                                                target_srgb);
+}
+
+void on_finish_effects(reshade::api::effect_runtime *runtime,
+                       reshade::api::command_list *commands,
+                       reshade::api::resource_view target,
+                       reshade::api::resource_view target_srgb)
+{
+    if (!framecompare::render::settings().enabled)
+        return;
+    framecompare::capture::on_finish_effects(runtime, commands, target,
+                                             target_srgb);
+    if (const auto *state = framecompare::capture::state_for(runtime))
+        framecompare::render::draw(runtime, commands, target, target_srgb,
+                                   *state);
+}
+}
+
+extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
+                                                  HMODULE reshade_module)
+{
+    if (!reshade::register_addon(addon_module, reshade_module))
+        return false;
+
+    reshade::register_event<reshade::addon_event::init_effect_runtime>(
+        on_init_runtime);
+    reshade::register_event<reshade::addon_event::destroy_effect_runtime>(
+        on_destroy_runtime);
+    reshade::register_event<reshade::addon_event::reshade_begin_effects>(
+        on_begin_effects);
+    reshade::register_event<reshade::addon_event::reshade_finish_effects>(
+        on_finish_effects);
+    reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(
+        on_reloaded_effects);
+    reshade::register_overlay(nullptr, framecompare::ui::draw_panel);
+    return true;
+}
+
+extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module,
+                                                    HMODULE reshade_module)
+{
+    reshade::unregister_overlay(nullptr, framecompare::ui::draw_panel);
+    reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(
+        on_reloaded_effects);
+    reshade::unregister_event<reshade::addon_event::reshade_finish_effects>(
+        on_finish_effects);
+    reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(
+        on_begin_effects);
+    reshade::unregister_event<reshade::addon_event::destroy_effect_runtime>(
+        on_destroy_runtime);
+    reshade::unregister_event<reshade::addon_event::init_effect_runtime>(
+        on_init_runtime);
+    reshade::unregister_addon(addon_module, reshade_module);
+}

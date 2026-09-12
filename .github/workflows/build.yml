@@ -1,0 +1,41 @@
+name: Build FrameCompare v2
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Static audit
+        run: python tools/static_audit.py
+
+      - name: Configure tests
+        run: cmake -S . -B build-tests -A x64 -DFRAMECOMPARE_BUILD_ADDON=OFF
+
+      - name: Build tests
+        run: cmake --build build-tests --config Release --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build-tests -C Release --output-on-failure
+
+      - name: Configure add-on
+        run: cmake -S . -B build-addon -A x64 -DFRAMECOMPARE_BUILD_TESTS=ON
+
+      - name: Build add-on
+        run: cmake --build build-addon --config Release --parallel
+
+      - name: Run add-on build tests
+        run: ctest --test-dir build-addon -C Release --output-on-failure
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrameCompare-v2-windows-x64
+          path: build-addon/Release/package/
+          if-no-files-found: error
