@@ -6,12 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = (
     "CMakeLists.txt",
     "src/addon_entry.cpp",
+    "src/control/split_motion.hpp",
+    "src/control/split_motion.cpp",
     "src/core/frame_pair.hpp",
     "src/core/frame_pair.cpp",
     "src/core/capture_cycle.hpp",
     "src/core/capture_cycle.cpp",
     "src/capture/reshade_capture.hpp",
     "src/capture/reshade_capture.cpp",
+    "src/input/hotkeys.hpp",
+    "src/input/hotkeys.cpp",
     "src/render/compositor.hpp",
     "src/render/compositor.cpp",
     "src/render/compositor_params.hpp",
@@ -23,6 +27,7 @@ REQUIRED = (
     "src/ui/panel.hpp",
     "src/ui/panel.cpp",
     "tests/label_layout_tests.cpp",
+    "tests/split_motion_tests.cpp",
     "shaders/FrameCompare.fx",
     ".github/workflows/build.yml",
 )
@@ -64,6 +69,11 @@ require_include_before(
     "#include <imgui.h>",
     '#include "ui/label_overlay.hpp"',
 )
+require_include_before(
+    "src/input/hotkeys.cpp",
+    "#include <imgui.h>",
+    '#include "input/hotkeys.hpp"',
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
@@ -85,10 +95,16 @@ if "not verified Vanilla" not in panel_source:
 entry_source = (ROOT / "src/addon_entry.cpp").read_text(encoding="utf-8")
 if 'register_overlay("OSD", framecompare::ui::draw_labels)' not in entry_source:
     fail("persistent labels are not registered with the ReShade OSD")
+if "should_capture_pair(frozen, pair_ready)" not in entry_source:
+    fail("freeze does not preserve a ready capture pair")
 
 label_header = (ROOT / "src/ui/label_layout.hpp").read_text(encoding="utf-8")
 if "'O', 'F', 'F'" not in label_header or "'O', 'N'" not in label_header:
     fail("persistent labels must default to OFF and ON")
+
+hotkey_header = (ROOT / "src/input/hotkeys.hpp").read_text(encoding="utf-8")
+if "ImGuiKeyChord" not in hotkey_header or "ImGuiKey_LeftArrow" not in hotkey_header:
+    fail("hotkeys must use direct named-key chords rather than numeric VK input")
 
 shader_source = (ROOT / "shaders/FrameCompare.fx").read_text(encoding="utf-8")
 if "FRAMECOMPARE_BEFORE" not in shader_source or "FRAMECOMPARE_AFTER" not in shader_source:

@@ -3,6 +3,8 @@
 #include "ui/panel.hpp"
 
 #include "capture/reshade_capture.hpp"
+#include "control/split_motion.hpp"
+#include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
 
@@ -40,6 +42,41 @@ void draw_panel(reshade::api::effect_runtime *runtime)
                        0.0f, 0.02f, "%.4f");
     ImGui::SliderFloat("线透明度 / Border opacity",
                        &settings.border_opacity, 0.0f, 1.0f, "%.2f");
+
+    auto &motion_controller = control::split_motion();
+    auto &motion = motion_controller.settings();
+    ImGui::Separator();
+    ImGui::TextUnformatted("移动、扫屏与冻结 / Motion, sweep and freeze");
+    ImGui::Checkbox("冻结当前画面对 / Freeze current pair", &motion.frozen);
+    ImGui::SliderFloat("手动移动速度 / Manual speed", &motion.manual_speed,
+                       0.01f, 1.0f, "%.2f screen/s");
+    ImGui::SliderFloat("自动扫屏速度 / Auto speed", &motion.auto_speed,
+                       0.01f, 1.0f, "%.2f screen/s");
+    int sweep_mode = static_cast<int>(motion.sweep_mode);
+    const char *sweep_modes[] = {
+        "左到右 / Left to right",
+        "右到左 / Right to left",
+        "往返 / Ping-pong"};
+    if (ImGui::Combo("自动模式 / Auto mode", &sweep_mode, sweep_modes, 3))
+        motion.sweep_mode = static_cast<control::SweepMode>(sweep_mode);
+    if (motion.auto_active)
+    {
+        if (ImGui::Button("停止自动扫屏 / Stop autosweep"))
+            motion_controller.stop();
+    }
+    else if (ImGui::Button("开始自动扫屏 / Start autosweep"))
+    {
+        motion_controller.start(motion.sweep_mode, settings.split_position);
+    }
+
+    ImGui::TextUnformatted("快捷键 / Hotkeys");
+    auto &bindings = input::hotkey_bindings();
+    input::draw_binding_editor("左移 / Move left", bindings.move_left);
+    input::draw_binding_editor("右移 / Move right", bindings.move_right);
+    input::draw_binding_editor("自动开始/停止 / Toggle autosweep",
+                               bindings.toggle_auto);
+    input::draw_binding_editor("冻结/继续 / Toggle freeze",
+                               bindings.toggle_freeze);
 
     auto &labels = label_settings();
     ImGui::Separator();

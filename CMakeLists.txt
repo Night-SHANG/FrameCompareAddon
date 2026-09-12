@@ -13,6 +13,7 @@ option(FRAMECOMPARE_BUILD_ADDON "Build the ReShade add-on" ON)
 option(FRAMECOMPARE_BUILD_TESTS "Build core unit tests" ON)
 
 add_library(framecompare_core STATIC
+    src/control/split_motion.cpp
     src/core/capture_cycle.cpp
     src/core/frame_pair.cpp
     src/render/compositor_params.cpp
@@ -33,6 +34,10 @@ if(FRAMECOMPARE_BUILD_TESTS)
     add_executable(label_layout_tests tests/label_layout_tests.cpp)
     target_link_libraries(label_layout_tests PRIVATE framecompare_core)
     add_test(NAME label_layout_tests COMMAND label_layout_tests)
+
+    add_executable(split_motion_tests tests/split_motion_tests.cpp)
+    target_link_libraries(split_motion_tests PRIVATE framecompare_core)
+    add_test(NAME split_motion_tests COMMAND split_motion_tests)
 endif()
 
 if(FRAMECOMPARE_BUILD_ADDON)
@@ -57,6 +62,7 @@ if(FRAMECOMPARE_BUILD_ADDON)
     add_library(FrameCompareV2 SHARED
         src/addon_entry.cpp
         src/capture/reshade_capture.cpp
+        src/input/hotkeys.cpp
         src/render/compositor.cpp
         src/ui/label_overlay.cpp
         src/ui/panel.cpp

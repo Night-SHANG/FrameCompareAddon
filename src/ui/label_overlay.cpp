@@ -2,6 +2,8 @@
 
 #include "ui/label_overlay.hpp"
 
+#include "control/split_motion.hpp"
+#include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 
 #include <algorithm>
@@ -76,7 +78,8 @@ LabelSettings &label_settings() noexcept
 
 void draw_labels(reshade::api::effect_runtime *)
 {
-    const auto &compositor = render::settings();
+    auto &compositor = render::settings();
+    input::update_controls(control::split_motion(), compositor.split_position);
     const ResolvedLabels layout = resolve_labels(
         g_label_settings, compositor.before_on_left);
     if (!compositor.enabled || !layout.visible)

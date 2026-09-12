@@ -1,6 +1,7 @@
 #include <imgui.h>
 
 #include "capture/reshade_capture.hpp"
+#include "control/split_motion.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
 #include "ui/panel.hpp"
@@ -43,7 +44,11 @@ void on_begin_effects(reshade::api::effect_runtime *runtime,
                       reshade::api::resource_view target_srgb)
 {
     framecompare::render::prepare_cycle(runtime);
-    if (framecompare::render::settings().enabled)
+    const auto *state = framecompare::capture::state_for(runtime);
+    const bool frozen = framecompare::control::split_motion().settings().frozen;
+    const bool pair_ready = state != nullptr && state->pair.ready();
+    if (framecompare::render::settings().enabled &&
+        framecompare::control::should_capture_pair(frozen, pair_ready))
         framecompare::capture::on_begin_effects(runtime, commands, target,
                                                 target_srgb);
 }
@@ -55,8 +60,12 @@ void on_finish_effects(reshade::api::effect_runtime *runtime,
 {
     if (!framecompare::render::settings().enabled)
         return;
-    framecompare::capture::on_finish_effects(runtime, commands, target,
-                                             target_srgb);
+    const auto *current = framecompare::capture::state_for(runtime);
+    const bool frozen = framecompare::control::split_motion().settings().frozen;
+    const bool pair_ready = current != nullptr && current->pair.ready();
+    if (framecompare::control::should_capture_pair(frozen, pair_ready))
+        framecompare::capture::on_finish_effects(runtime, commands, target,
+                                                 target_srgb);
     if (const auto *state = framecompare::capture::state_for(runtime))
         framecompare::render::draw(runtime, commands, target, target_srgb,
                                    *state);
