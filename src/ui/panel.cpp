@@ -3,7 +3,9 @@
 #include "ui/panel.hpp"
 
 #include "capture/reshade_capture.hpp"
+#include "config/config_runtime.hpp"
 #include "control/split_motion.hpp"
+#include "hud/indicator_panel.hpp"
 #include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
@@ -84,6 +86,10 @@ void draw_panel(reshade::api::effect_runtime *runtime)
     auto &bindings = input::hotkey_bindings();
     input::draw_binding_editor("左移 / Move left", bindings.move_left);
     input::draw_binding_editor("右移 / Move right", bindings.move_right);
+    input::draw_binding_editor("中心取景向左 / Center focus left",
+                               bindings.focus_left);
+    input::draw_binding_editor("中心取景向右 / Center focus right",
+                               bindings.focus_right);
     input::draw_binding_editor("启用/关闭实时对比 / Toggle comparison",
                                bindings.toggle_comparison);
     input::draw_binding_editor("自动开始/停止 / Toggle autosweep",
@@ -128,6 +134,24 @@ void draw_panel(reshade::api::effect_runtime *runtime)
                     0.0f, 1.0f, label_defaults.outline_opacity, "%.2f");
     if (ImGui::Button("恢复标签默认 / Reset label defaults"))
         labels = LabelSettings{};
+
+    hud::draw_indicator_panel();
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("配置文件 / Configuration");
+    ImGui::TextWrapped(
+        "所有设置自动保存到插件同目录的 FrameCompare.ini。"
+        " / All settings auto-save beside the add-on DLL.");
+    if (ImGui::Button("立即保存 / Save now"))
+        config::save_now();
+    ImGui::SameLine();
+    if (ImGui::Button("重新读取 / Reload"))
+    {
+        if (config::reload_now())
+            capture::reset_runtime_state(runtime);
+    }
+    if (!config::status_message().empty())
+        ImGui::TextDisabled("%s", config::status_message().c_str());
 
     const auto *state = capture::state_for(runtime);
     const bool ready = state != nullptr && state->pair.ready();

@@ -39,4 +39,7 @@ ShaderParams make_shader_params(const CompositorSettings &settings,
 bool toggle_enabled(CompositorSettings &settings) noexcept;
 void toggle_display_mode(CompositorSettings &settings) noexcept;
 void toggle_border(CompositorSettings &settings) noexcept;
+void move_center_focus(CompositorSettings &settings, float delta_seconds,
+                       float speed, bool move_left,
+                       bool move_right) noexcept;
 }

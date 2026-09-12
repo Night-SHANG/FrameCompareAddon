@@ -37,4 +37,17 @@ void toggle_border(CompositorSettings &settings) noexcept
 {
     settings.show_border = !settings.show_border;
 }
+
+void move_center_focus(CompositorSettings &settings, float delta_seconds,
+                       float speed, bool move_left,
+                       bool move_right) noexcept
+{
+    const int direction = static_cast<int>(move_right) -
+                          static_cast<int>(move_left);
+    const float step = std::max(delta_seconds, 0.0f) *
+                       std::max(speed, 0.0f);
+    settings.center_focus = std::clamp(
+        settings.center_focus + static_cast<float>(direction) * step,
+        0.0f, 1.0f);
+}
 }

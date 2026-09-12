@@ -1,6 +1,7 @@
 #include <imgui.h>
 
 #include "capture/reshade_capture.hpp"
+#include "config/config_runtime.hpp"
 #include "control/split_motion.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
@@ -78,6 +79,8 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
     if (!reshade::register_addon(addon_module, reshade_module))
         return false;
 
+    framecompare::config::initialize(addon_module);
+
     reshade::register_event<reshade::addon_event::init_effect_runtime>(
         on_init_runtime);
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(
@@ -96,6 +99,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module,
                                                     HMODULE reshade_module)
 {
+    framecompare::config::shutdown();
     reshade::unregister_overlay("OSD", framecompare::ui::draw_labels);
     reshade::unregister_overlay(nullptr, framecompare::ui::draw_panel);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(

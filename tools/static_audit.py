@@ -5,13 +5,27 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = (
     "CMakeLists.txt",
+    "FrameCompare.ini.example",
     "src/addon_entry.cpp",
+    "src/config/ini_document.hpp",
+    "src/config/ini_document.cpp",
+    "src/config/settings_codec.hpp",
+    "src/config/settings_encode.cpp",
+    "src/config/settings_decode.cpp",
+    "src/config/config_runtime.hpp",
+    "src/config/config_runtime.cpp",
     "src/control/split_motion.hpp",
     "src/control/split_motion.cpp",
     "src/core/frame_pair.hpp",
     "src/core/frame_pair.cpp",
     "src/core/capture_cycle.hpp",
     "src/core/capture_cycle.cpp",
+    "src/hud/indicator_model.hpp",
+    "src/hud/indicator_model.cpp",
+    "src/hud/indicator_panel.hpp",
+    "src/hud/indicator_panel.cpp",
+    "src/hud/indicator_overlay.hpp",
+    "src/hud/indicator_overlay.cpp",
     "src/capture/reshade_capture.hpp",
     "src/capture/reshade_capture.cpp",
     "src/input/hotkeys.hpp",
@@ -30,6 +44,8 @@ REQUIRED = (
     "src/ui/panel.cpp",
     "tests/label_layout_tests.cpp",
     "tests/split_motion_tests.cpp",
+    "tests/ini_document_tests.cpp",
+    "tests/indicator_model_tests.cpp",
     "shaders/FrameCompare.fx",
     ".github/workflows/build.yml",
 )
@@ -81,6 +97,11 @@ require_include_before(
     "#include <imgui.h>",
     "#include <reshade.hpp>",
 )
+require_include_before(
+    "src/hud/indicator_overlay.cpp",
+    "#include <imgui.h>",
+    '#include "hud/indicator_overlay.hpp"',
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
@@ -115,12 +136,38 @@ hotkey_header = (ROOT / "src/input/hotkeys.hpp").read_text(encoding="utf-8")
 if "ImGuiKeyChord" not in hotkey_header or "ImGuiKey_LeftArrow" not in hotkey_header:
     fail("hotkeys must use direct named-key chords rather than numeric VK input")
 for required_binding in (
+    "focus_left",
+    "focus_right",
     "toggle_comparison",
     "toggle_display_mode",
     "toggle_border",
 ):
     if required_binding not in hotkey_header:
         fail(f"hotkeys are missing {required_binding}")
+
+config_entry_requirements = (
+    "framecompare::config::initialize(addon_module)",
+    "framecompare::config::shutdown()",
+)
+for requirement in config_entry_requirements:
+    if requirement not in entry_source:
+        fail(f"add-on lifecycle is missing {requirement}")
+
+config_runtime_source = (ROOT / "src/config/config_runtime.cpp").read_text(
+    encoding="utf-8"
+)
+for requirement in ("FrameCompare.ini", "0.75f", "save_now", "reload_now"):
+    if requirement not in config_runtime_source:
+        fail(f"configuration runtime is missing {requirement}")
+
+indicator_overlay_source = (ROOT / "src/hud/indicator_overlay.cpp").read_text(
+    encoding="utf-8"
+)
+if "get_effects_state" not in indicator_overlay_source:
+    fail("ReShade HUD source must read the actual effects state")
+
+if "FrameCompare.ini.example" not in cmake_source:
+    fail("portable INI example is not included in the build artifact")
 
 motion_source = (ROOT / "src/control/split_motion.cpp").read_text(
     encoding="utf-8"

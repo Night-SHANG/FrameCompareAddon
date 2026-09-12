@@ -45,6 +45,16 @@ int main()
     require(ready.center_focus == 1.0f,
             "center focus should clamp to the right edge");
 
+    settings.center_focus = 0.5f;
+    framecompare::render::move_center_focus(
+        settings, 0.5f, 0.2f, false, true);
+    require(settings.center_focus == 0.6f,
+            "held focus-right input should move by speed times frame time");
+    framecompare::render::move_center_focus(
+        settings, 10.0f, 1.0f, true, false);
+    require(settings.center_focus == 0.0f,
+            "center-focus movement should clamp to the left edge");
+
     require(!framecompare::render::toggle_enabled(settings),
             "comparison toggle should report the disabled state");
     require(!settings.enabled,

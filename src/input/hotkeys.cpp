@@ -10,7 +10,7 @@ namespace framecompare::input
 namespace
 {
 HotkeyBindings g_bindings;
-ImGuiKeyChord *g_capture_target = nullptr;
+std::string g_capture_label;
 int g_last_update_frame = -1;
 
 ImGuiKey chord_key(ImGuiKeyChord chord) noexcept
@@ -107,27 +107,40 @@ HotkeyBindings &hotkey_bindings() noexcept
 
 bool hotkey_capture_active() noexcept
 {
-    return g_capture_target != nullptr;
+    return !g_capture_label.empty();
 }
 
-void draw_binding_editor(const char *label, ImGuiKeyChord &binding)
+void cancel_hotkey_capture() noexcept
 {
+    g_capture_label.clear();
+}
+
+bool binding_pressed(ImGuiKeyChord binding) noexcept
+{
+    return !hotkey_capture_active() && !ImGui::GetIO().WantCaptureKeyboard &&
+           chord_pressed(binding);
+}
+
+bool draw_binding_editor(const char *label, ImGuiKeyChord &binding)
+{
+    bool changed = false;
     ImGui::TextUnformatted(label);
     ImGui::SameLine();
     const std::string name = chord_name(binding);
     const std::string button_label = name + "##" + label;
     if (ImGui::Button(button_label.c_str()))
-        g_capture_target = &binding;
+        g_capture_label = label;
     ImGui::SameLine();
     const std::string clear_label = std::string("清除 / Clear##") + label;
     if (ImGui::Button(clear_label.c_str()))
     {
         binding = ImGuiKey_None;
-        if (g_capture_target == &binding)
-            g_capture_target = nullptr;
+        if (g_capture_label == label)
+            g_capture_label.clear();
+        changed = true;
     }
 
-    if (g_capture_target == &binding)
+    if (g_capture_label == label)
     {
         ImGui::SameLine();
         ImGui::TextUnformatted("请按键 / Press a key...");
@@ -135,9 +148,11 @@ void draw_binding_editor(const char *label, ImGuiKeyChord &binding)
         if (captured != ImGuiKey_None)
         {
             binding = captured;
-            g_capture_target = nullptr;
+            g_capture_label.clear();
+            changed = true;
         }
     }
+    return changed;
 }
 
 ControlUpdateResult update_controls(
@@ -168,6 +183,10 @@ ControlUpdateResult update_controls(
     controller.update(compositor.split_position, io.DeltaTime,
                       chord_down(g_bindings.move_left),
                       chord_down(g_bindings.move_right));
+    render::move_center_focus(
+        compositor, io.DeltaTime, controller.settings().manual_speed,
+        chord_down(g_bindings.focus_left),
+        chord_down(g_bindings.focus_right));
     return result;
 }
 }

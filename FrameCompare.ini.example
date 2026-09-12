@@ -1,0 +1,35 @@
+; FrameCompare v2 portable configuration example (UTF-8)
+; Configure shortcuts from the in-game key capture UI.
+
+[General]
+Enabled=1
+BeforeOnLeft=1
+DisplayMode=0
+
+[Divider]
+Position=0.500000
+CenterFocus=0.500000
+ShowBorder=1
+BorderWidth=0.002000
+BorderOpacity=1.000000
+
+[Motion]
+ManualSpeed=0.250000
+AutoSpeed=0.200000
+SweepMode=0
+
+[Labels]
+Visible=1
+BeforeText=OFF
+AfterText=ON
+LeftX=0.030000
+LeftY=0.040000
+RightX=0.970000
+RightY=0.040000
+FontSize=36.000000
+Opacity=1.000000
+OutlineWidth=2.000000
+OutlineOpacity=0.850000
+
+[HUD]
+Count=0

@@ -3,7 +3,9 @@
 #include "ui/label_overlay.hpp"
 
 #include "capture/reshade_capture.hpp"
+#include "config/config_runtime.hpp"
 #include "control/split_motion.hpp"
+#include "hud/indicator_overlay.hpp"
 #include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 
@@ -91,6 +93,8 @@ void draw_labels(reshade::api::effect_runtime *runtime)
         control::split_motion(), compositor);
     if (controls.comparison_disabled)
         capture::reset_runtime_state(runtime);
+    hud::update_and_draw_indicators(runtime);
+    config::tick();
     const ResolvedLabels layout = resolve_labels(
         g_label_settings, compositor.before_on_left);
     if (!compositor.enabled || !layout.visible)

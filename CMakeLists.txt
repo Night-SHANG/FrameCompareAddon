@@ -14,8 +14,10 @@ option(FRAMECOMPARE_BUILD_TESTS "Build core unit tests" ON)
 
 add_library(framecompare_core STATIC
     src/control/split_motion.cpp
+    src/config/ini_document.cpp
     src/core/capture_cycle.cpp
     src/core/frame_pair.cpp
+    src/hud/indicator_model.cpp
     src/render/compositor_params.cpp
     src/ui/label_layout.cpp
 )
@@ -38,6 +40,14 @@ if(FRAMECOMPARE_BUILD_TESTS)
     add_executable(split_motion_tests tests/split_motion_tests.cpp)
     target_link_libraries(split_motion_tests PRIVATE framecompare_core)
     add_test(NAME split_motion_tests COMMAND split_motion_tests)
+
+    add_executable(ini_document_tests tests/ini_document_tests.cpp)
+    target_link_libraries(ini_document_tests PRIVATE framecompare_core)
+    add_test(NAME ini_document_tests COMMAND ini_document_tests)
+
+    add_executable(indicator_model_tests tests/indicator_model_tests.cpp)
+    target_link_libraries(indicator_model_tests PRIVATE framecompare_core)
+    add_test(NAME indicator_model_tests COMMAND indicator_model_tests)
 endif()
 
 if(FRAMECOMPARE_BUILD_ADDON)
@@ -62,6 +72,11 @@ if(FRAMECOMPARE_BUILD_ADDON)
     add_library(FrameCompareV2 SHARED
         src/addon_entry.cpp
         src/capture/reshade_capture.cpp
+        src/config/config_runtime.cpp
+        src/config/settings_decode.cpp
+        src/config/settings_encode.cpp
+        src/hud/indicator_overlay.cpp
+        src/hud/indicator_panel.cpp
         src/input/hotkeys.cpp
         src/render/compositor.cpp
         src/ui/label_overlay.cpp
@@ -95,5 +110,8 @@ if(FRAMECOMPARE_BUILD_ADDON)
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_SOURCE_DIR}/shaders/FrameCompare.fx"
             "$<TARGET_FILE_DIR:FrameCompareV2>/package/reshade-shaders/Shaders/FrameCompare.fx"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/FrameCompare.ini.example"
+            "$<TARGET_FILE_DIR:FrameCompareV2>/package/FrameCompare.ini.example"
     )
 endif()
