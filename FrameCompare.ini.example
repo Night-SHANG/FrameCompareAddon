@@ -9,6 +9,9 @@ Enabled=1
 BeforeOnLeft=1
 DisplayMode=0
 
+[DLSS5]
+Enabled=0
+
 [Divider]
 Position=0.500000
 CenterFocus=0.500000

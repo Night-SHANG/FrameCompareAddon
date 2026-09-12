@@ -3,3 +3,6 @@
 *.obj
 *.pdb
 *.addon64
+*.addon32
+__pycache__/
+*.pyc

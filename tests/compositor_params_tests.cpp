@@ -18,6 +18,8 @@ void require(bool condition, const char *message)
 int main()
 {
     framecompare::render::CompositorSettings settings;
+    require(!settings.dlss5_before,
+            "DLSS5 Before source must default to disabled");
     settings.split_position = -0.25f;
     settings.border_width = -3.0f;
     settings.border_opacity = 2.0f;

@@ -3,6 +3,8 @@
 #include "capture/reshade_capture.hpp"
 #include "config/config_runtime.hpp"
 #include "control/split_motion.hpp"
+#include "integrations/dlss5/hook_manager.hpp"
+#include "integrations/dlss5/runtime.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
 #include "ui/panel.hpp"
@@ -21,6 +23,22 @@ extern "C" __declspec(dllexport) const char *DESCRIPTION =
 
 namespace
 {
+void publish_dlss5_settings()
+{
+    const auto &settings = framecompare::render::settings();
+    const bool effective = settings.enabled && settings.dlss5_before &&
+        settings.display_mode ==
+            framecompare::render::DisplayMode::same_coordinate_wipe;
+    framecompare::dlss5::publish_settings({
+        effective, settings.split_position, settings.before_on_left});
+}
+
+void draw_panel(reshade::api::effect_runtime *runtime)
+{
+    framecompare::ui::draw_panel(runtime);
+    publish_dlss5_settings();
+}
+
 void on_init_runtime(reshade::api::effect_runtime *runtime)
 {
     framecompare::capture::on_init_runtime(runtime);
@@ -45,6 +63,7 @@ void on_begin_effects(reshade::api::effect_runtime *runtime,
                       reshade::api::resource_view target_srgb)
 {
     framecompare::render::prepare_cycle(runtime);
+    publish_dlss5_settings();
     const auto *state = framecompare::capture::state_for(runtime);
     const bool frozen = framecompare::control::split_motion().settings().frozen;
     const bool pair_ready = state != nullptr && state->pair.ready();
@@ -80,6 +99,8 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
         return false;
 
     framecompare::config::initialize(addon_module);
+    publish_dlss5_settings();
+    framecompare::dlss5::start_hooks();
 
     reshade::register_event<reshade::addon_event::init_effect_runtime>(
         on_init_runtime);
@@ -91,7 +112,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
         on_finish_effects);
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(
         on_reloaded_effects);
-    reshade::register_overlay(nullptr, framecompare::ui::draw_panel);
+    reshade::register_overlay(nullptr, draw_panel);
     reshade::register_overlay("OSD", framecompare::ui::draw_labels);
     return true;
 }
@@ -99,9 +120,11 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module,
                                                     HMODULE reshade_module)
 {
+    framecompare::dlss5::publish_settings({false, 0.5f, true});
+    framecompare::dlss5::stop_hooks();
     framecompare::config::shutdown();
     reshade::unregister_overlay("OSD", framecompare::ui::draw_labels);
-    reshade::unregister_overlay(nullptr, framecompare::ui::draw_panel);
+    reshade::unregister_overlay(nullptr, draw_panel);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(
         on_reloaded_effects);
     reshade::unregister_event<reshade::addon_event::reshade_finish_effects>(

@@ -5,6 +5,10 @@ FrameCompare v2 is a ReShade add-on for same-frame realtime Before/After compari
 ## Current behavior
 
 - Captures the render target immediately before and after the ReShade effect chain.
+- Optionally replaces only the current Before-side region with the pre-DLSS5
+  `DLSSNR.Color` image after a successful D3D11/D3D12 DLSSNR Evaluate call.
+- Keeps the original generic Pre-ReShade Before path when the DLSS5 option is
+  disabled, unavailable or incompatible.
 - Requires both captures to have the same runtime and effect-cycle token.
 - Composites the pair entirely on the GPU.
 - Supports a same-coordinate wipe and a SplitScreenCR-inspired center remap.
@@ -47,6 +51,52 @@ The group and portable-INI concepts are inspired by the MIT-licensed [ShaderTogg
 
 The generic source is deliberately labeled `Pre-ReShade FX`. It is not claimed to be verified Vanilla because DLSS, RenoDX or game-specific processing may already have changed the frame.
 
+## DLSS5-aware Before source
+
+The Compare tab contains `DLSS5 处理前画面作为 Before`, disabled by default.
+With it disabled, FrameCompare behaves like v2.0.0: Before is the existing
+Pre-ReShade FX capture and After is Post-ReShade FX.
+
+With it enabled in same-coordinate mode, FrameCompare observes the existing
+`nvngx_dlssnr.dll` call. After DLSSNR finishes, it copies the current Before-side
+region from `DLSSNR.Color` into `DLSSNR.Output`. The existing FrameCompare capture
+then produces this comparison:
+
+- Before side: game image before DLSS5 and before the ReShade preset.
+- After side: DLSS5 output with the ReShade preset.
+
+Side order, split position, labels, manual movement, sweep, freeze, border and
+hotkeys continue to use the existing FrameCompare settings. Center-remap mode
+currently falls back to the generic Pre-ReShade FX Before because a safe
+temporary-output lifetime has not been validated for that remapping path. The
+panel displays this limitation when both settings are selected.
+
+The integration is fail-open. A missing module, missing parameter, incompatible
+resource, existing detour or hook failure skips the DLSS5 region copy and leaves
+the original NGX result and generic FrameCompare path available. D3D12 region
+copying was validated in game with DLSS5 still operational. D3D11 is implemented
+from the same validated resource contract but still needs in-game validation.
+
+## Installation and DLSS5 test
+
+Copy the package contents beside the game ReShade installation. Before testing
+this integrated build, remove these older add-ons from the ReShade add-on folder:
+
+- `00-FrameCompare-v2.addon64` or `00-FrameCompare-v2.addon32`
+- the standalone `RenoDxNgxObserver` validator
+
+Do not load either old file together with the integrated add-on because two
+copies would compete for the same FrameCompare or NGX hooks. Keep the game's
+normal RenoDX DLSS add-on and `nvngx_dlssnr.dll` in place.
+
+Start the game, open ReShade's Add-ons page and expand FrameCompare v2. In the
+Compare tab, verify that the DLSS5 module changes from `等待载入` to `已载入` and
+that at least one D3D11 or D3D12 Evaluate hook shows `1`. Enable realtime
+comparison, use same-coordinate mode, then check `DLSS5 处理前画面作为 Before`.
+The matching API's applied counter should increase. `Last result: applied`
+confirms that the pre-DLSS5 region was copied; skipped counters and the last
+error explain why the generic path was used instead.
+
 ## Build
 
 GitHub Actions is the authoritative build environment. The workflow uses Windows Server 2022, Visual Studio, CMake and ReShade API v6.8.0. Every build verifies both x64 and Win32; version tags matching `v*.*.*` publish a GitHub Release only after both architectures pass.
@@ -62,10 +112,11 @@ ctest --test-dir build-tests -C Release --output-on-failure
 The uploaded artifact contains:
 
 ```text
-00-FrameCompare-v2.addon64 (x64 package)
-00-FrameCompare-v2.addon32 (x86 package)
+00-nvngx.dll-FrameCompare-v2.addon64 (x64 package)
+00-nvngx.dll-FrameCompare-v2.addon32 (x86 package)
 FrameCompare.ini.example
+THIRD_PARTY.md
 reshade-shaders/Shaders/FrameCompare.fx
 ```
 
-The Phase 1 realtime split was accepted in-game on 2026-09-12. Persistent labels, motion, automatic sweep, direct hotkey capture, freeze and precision controls are implemented in Phase 2. INI persistence and customizable multi-entry status HUD are implemented in Phase 3. These features require in-game validation with the latest artifact. Provider-specific verified Vanilla capture remains later work.
+The Phase 1 realtime split was accepted in-game on 2026-09-12. Persistent labels, motion, automatic sweep, direct hotkey capture, freeze and precision controls are implemented in Phase 2. INI persistence and customizable multi-entry status HUD are implemented in Phase 3. The standalone D3D12 DLSSNR validator proved that the in-place region copy can run while DLSS5 remains operational; this behavior is now integrated behind the optional checkbox. The combined build still requires in-game validation with the latest artifact.

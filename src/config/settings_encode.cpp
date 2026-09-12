@@ -44,6 +44,7 @@ std::string encode_current_settings()
                  boolean(compositor.before_on_left));
     document.set("General", "DisplayMode",
                  std::to_string(static_cast<int>(compositor.display_mode)));
+    document.set("DLSS5", "Enabled", boolean(compositor.dlss5_before));
 
     document.set("Divider", "Position", number(compositor.split_position));
     document.set("Divider", "CenterFocus", number(compositor.center_focus));

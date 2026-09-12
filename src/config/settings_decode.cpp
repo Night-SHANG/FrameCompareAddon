@@ -129,6 +129,8 @@ void decode_current_settings(std::string_view text)
     compositor.display_mode = static_cast<render::DisplayMode>(std::clamp(
         reader.integer("General", "DisplayMode",
                        static_cast<int>(compositor.display_mode)), 0, 1));
+    compositor.dlss5_before = reader.boolean(
+        "DLSS5", "Enabled", compositor.dlss5_before);
     compositor.split_position = std::clamp(reader.number(
         "Divider", "Position", compositor.split_position), 0.0f, 1.0f);
     compositor.center_focus = std::clamp(reader.number(

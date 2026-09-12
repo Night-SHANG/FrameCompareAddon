@@ -8,12 +8,15 @@
 #include "control/split_motion.hpp"
 #include "hud/indicator_panel.hpp"
 #include "input/hotkeys.hpp"
+#include "integrations/dlss5/hook_manager.hpp"
+#include "integrations/dlss5/runtime.hpp"
 #include "render/compositor.hpp"
 #include "ui/i18n/localization.hpp"
 #include "ui/label_overlay.hpp"
 #include "ui/parameter_widgets.hpp"
 
 #include <array>
+#include <string_view>
 
 namespace framecompare::ui::pages
 {
@@ -86,6 +89,53 @@ void draw_compare_page(reshade::api::effect_runtime *runtime)
     if (ImGui::Combo(mode_label.c_str(), &mode, modes.data(),
                      static_cast<int>(modes.size())))
         settings.display_mode = static_cast<render::DisplayMode>(mode);
+
+    ImGui::Separator();
+    const std::string dlss5_label = l(TextId::dlss5_before, "dlss5-before");
+    ImGui::Checkbox(dlss5_label.c_str(), &settings.dlss5_before);
+    ImGui::TextWrapped("%s", t(TextId::dlss5_help));
+    if (settings.dlss5_before &&
+        settings.display_mode == render::DisplayMode::center_remap)
+        ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.15f, 1.0f), "%s",
+                           t(TextId::dlss5_center_unsupported));
+
+    const std::string diagnostics_label = l(
+        TextId::dlss5_diagnostics, "dlss5-diagnostics");
+    if (ImGui::CollapsingHeader(diagnostics_label.c_str()))
+    {
+        const dlss5::HookSnapshot hooks = dlss5::hook_snapshot();
+        const dlss5::DiagnosticsSnapshot copies = dlss5::diagnostics_snapshot();
+        ImGui::Text("%s: %s", t(TextId::dlss5_module),
+                    t(hooks.module_loaded ? TextId::dlss5_loaded
+                                          : TextId::dlss5_waiting));
+        ImGui::Text("%s: D3D11=%d/%d, D3D12=%d/%d",
+                    t(TextId::dlss5_hooks), hooks.d3d11_evaluate,
+                    hooks.d3d11_evaluate_c, hooks.d3d12_evaluate,
+                    hooks.d3d12_evaluate_c);
+        ImGui::Text("%s: D3D11=%llu, D3D12=%llu, pairs=%llu, incomplete=%llu",
+                    t(TextId::dlss5_calls),
+                    static_cast<unsigned long long>(hooks.d3d11_calls),
+                    static_cast<unsigned long long>(hooks.d3d12_calls),
+                    static_cast<unsigned long long>(hooks.resource_pairs),
+                    static_cast<unsigned long long>(hooks.incomplete_calls));
+        ImGui::Text("%s: D3D11=%llu/%llu, D3D12=%llu/%llu",
+                    t(TextId::dlss5_copies),
+                    static_cast<unsigned long long>(copies.d3d11_applied),
+                    static_cast<unsigned long long>(copies.d3d11_skipped),
+                    static_cast<unsigned long long>(copies.d3d12_applied),
+                    static_cast<unsigned long long>(copies.d3d12_skipped));
+        const std::string_view outcome = dlss5::copy_outcome_name(
+            copies.last_outcome);
+        ImGui::Text("%s: %.*s (%u,%u)-(%u,%u)",
+                    t(TextId::dlss5_last_result),
+                    static_cast<int>(outcome.size()), outcome.data(),
+                    copies.last_region.left, copies.last_region.top,
+                    copies.last_region.right, copies.last_region.bottom);
+        if (!hooks.last_error.empty())
+            ImGui::TextWrapped("%s: %s", t(TextId::dlss5_last_error),
+                               hooks.last_error.c_str());
+    }
+    ImGui::Separator();
 
     if (settings.display_mode == render::DisplayMode::center_remap)
     {

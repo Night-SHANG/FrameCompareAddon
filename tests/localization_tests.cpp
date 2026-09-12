@@ -50,6 +50,13 @@ int main()
     require(label(TextId::tab_compare, "tab-compare") ==
                 "对比##tab-compare",
             "localized labels should retain stable ImGui identifiers");
+    require(std::string_view(text(TextId::dlss5_before)) ==
+                "DLSS5 处理前画面作为 Before",
+            "the DLSS5 checkbox needs a precise Chinese label");
+    require(std::string_view(text(TextId::dlss5_before,
+                                  UiLanguage::en)) ==
+                "Use pre-DLSS5 image for Before",
+            "the DLSS5 checkbox needs an English translation");
 
     std::cout << "localization_tests: PASS\n";
 }

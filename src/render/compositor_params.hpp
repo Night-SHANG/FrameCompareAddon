@@ -13,6 +13,7 @@ enum class DisplayMode : std::uint8_t
 struct CompositorSettings
 {
     bool enabled = true;
+    bool dlss5_before = false;
     bool before_on_left = true;
     bool show_border = true;
     float split_position = 0.5f;
