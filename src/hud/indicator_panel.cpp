@@ -1,4 +1,5 @@
 #include <imgui.h>
+#include <reshade.hpp>
 
 #include "hud/indicator_panel.hpp"
 

@@ -102,6 +102,11 @@ require_include_before(
     "#include <imgui.h>",
     '#include "hud/indicator_overlay.hpp"',
 )
+require_include_before(
+    "src/hud/indicator_panel.cpp",
+    "#include <imgui.h>",
+    "#include <reshade.hpp>",
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
