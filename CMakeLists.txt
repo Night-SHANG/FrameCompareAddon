@@ -4,6 +4,10 @@ project(FrameCompareV2 VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 option(FRAMECOMPARE_BUILD_ADDON "Build the ReShade add-on" ON)
 option(FRAMECOMPARE_BUILD_TESTS "Build core unit tests" ON)
@@ -64,8 +68,6 @@ if(FRAMECOMPARE_BUILD_ADDON)
     target_link_libraries(FrameCompareV2 PRIVATE framecompare_core)
     if(MSVC)
         target_compile_options(FrameCompareV2 PRIVATE /W4 /permissive- /utf-8 /EHsc)
-        set_property(TARGET FrameCompareV2 PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
     set_target_properties(FrameCompareV2 PROPERTIES
         PREFIX ""

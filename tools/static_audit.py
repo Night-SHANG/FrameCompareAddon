@@ -40,6 +40,10 @@ for relative in REQUIRED:
     if not (ROOT / relative).is_file():
         fail(f"missing {relative}")
 
+cmake_source = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+if "set(CMAKE_MSVC_RUNTIME_LIBRARY" not in cmake_source:
+    fail("CMake must select one MSVC runtime library for every target")
+
 require_include_before(
     "src/addon_entry.cpp",
     "#include <imgui.h>",
