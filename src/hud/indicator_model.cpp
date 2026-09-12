@@ -59,6 +59,29 @@ void reset_indicator_runtime(Indicator &indicator) noexcept
     indicator.changed_at_seconds = 0.0;
 }
 
+std::array<float, 2> place_indicator(
+    float normalized_x, float normalized_y,
+    float text_width, float text_height,
+    float display_width, float display_height,
+    float safe_margin) noexcept
+{
+    const float width = std::max(text_width, 0.0f);
+    const float height = std::max(text_height, 0.0f);
+    const float screen_width = std::max(display_width, 0.0f);
+    const float screen_height = std::max(display_height, 0.0f);
+    const float max_x = std::max(screen_width - width, 0.0f);
+    const float max_y = std::max(screen_height - height, 0.0f);
+    const float inset_x = std::clamp(safe_margin, 0.0f, max_x * 0.5f);
+    const float inset_y = std::clamp(safe_margin, 0.0f, max_y * 0.5f);
+    const float x = std::clamp(
+        std::clamp(normalized_x, 0.0f, 1.0f) * screen_width - width * 0.5f,
+        inset_x, max_x - inset_x);
+    const float y = std::clamp(
+        std::clamp(normalized_y, 0.0f, 1.0f) * screen_height - height * 0.5f,
+        inset_y, max_y - inset_y);
+    return {x, y};
+}
+
 std::vector<Indicator> &indicators() noexcept
 {
     return g_indicators;

@@ -44,17 +44,11 @@ void draw_indicator(ImDrawList *draw_list, const Indicator &indicator,
     text_size.x *= font_scale;
     text_size.y *= font_scale;
 
-    ImVec2 position(
-        std::clamp(indicator.x, 0.0f, 1.0f) * display_size.x -
-            text_size.x * 0.5f,
-        std::clamp(indicator.y, 0.0f, 1.0f) * display_size.y -
-            text_size.y * 0.5f);
-    position.x = std::clamp(
-        position.x, 0.0f, std::max(display_size.x - text_size.x, 0.0f));
-    position.y = std::clamp(
-        position.y, 0.0f, std::max(display_size.y - text_size.y, 0.0f));
-
     const float outline = std::clamp(style.outline_width, 0.0f, 8.0f);
+    const auto placement = place_indicator(
+        indicator.x, indicator.y, text_size.x, text_size.y,
+        display_size.x, display_size.y, 12.0f + outline);
+    const ImVec2 position(placement[0], placement[1]);
     if (outline > 0.0f && style.outline_opacity > 0.0f)
     {
         const ImVec2 offsets[] = {

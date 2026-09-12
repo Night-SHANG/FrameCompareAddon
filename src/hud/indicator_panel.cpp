@@ -34,7 +34,7 @@ void draw_indicator_panel()
         Indicator &item = items[index];
         ImGui::PushID(static_cast<int>(index));
         const std::string title = std::string(item.name.data()) +
-                                  "##status-item";
+                                  "###status-item";
         const bool open = ImGui::TreeNodeEx(
             title.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
         ImGui::SameLine();

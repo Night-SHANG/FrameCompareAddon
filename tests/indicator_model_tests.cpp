@@ -50,11 +50,22 @@ void reshade_source_follows_actual_runtime_state()
     require(!indicator.runtime_on && indicator.changed_at_seconds == 2.0,
             "ReShade source should follow actual runtime changes");
 }
+
+void top_right_indicator_respects_safe_margin()
+{
+    const auto position = framecompare::hud::place_indicator(
+        0.946f, 0.073f, 280.0f, 64.0f, 1567.0f, 881.0f, 14.0f);
+    require(position[0] == 1273.0f,
+            "right-aligned indicator should keep its safe margin");
+    require(position[1] >= 14.0f,
+            "top indicator should keep its safe margin");
+}
 }
 
 int main()
 {
     tracked_hotkey_toggles_and_expires();
     reshade_source_follows_actual_runtime_state();
+    top_right_indicator_respects_safe_margin();
     std::cout << "indicator_model_tests: PASS\n";
 }

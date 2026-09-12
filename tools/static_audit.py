@@ -103,6 +103,12 @@ if "not verified Vanilla" not in panel_source:
 if "mirror_left_to_right" not in panel_source or "mirror_right_to_left" not in panel_source:
     fail("panel is missing two-way label position mirroring")
 
+indicator_panel_source = (ROOT / "src/hud/indicator_panel.cpp").read_text(
+    encoding="utf-8"
+)
+if "###status-item" not in indicator_panel_source:
+    fail("editable indicator titles must keep a stable ImGui ID")
+
 entry_source = (ROOT / "src/addon_entry.cpp").read_text(encoding="utf-8")
 if 'register_overlay("OSD", framecompare::ui::draw_labels)' not in entry_source:
     fail("persistent labels are not registered with the ReShade OSD")

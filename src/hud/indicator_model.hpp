@@ -43,6 +43,11 @@ bool indicator_visible(const Indicator &indicator,
                        double now_seconds) noexcept;
 const char *indicator_text(const Indicator &indicator) noexcept;
 void reset_indicator_runtime(Indicator &indicator) noexcept;
+std::array<float, 2> place_indicator(
+    float normalized_x, float normalized_y,
+    float text_width, float text_height,
+    float display_width, float display_height,
+    float safe_margin) noexcept;
 
 std::vector<Indicator> &indicators() noexcept;
 void reset_all_indicator_runtime() noexcept;
