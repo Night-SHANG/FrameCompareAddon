@@ -114,6 +114,25 @@ if "'O', 'F', 'F'" not in label_header or "'O', 'N'" not in label_header:
 hotkey_header = (ROOT / "src/input/hotkeys.hpp").read_text(encoding="utf-8")
 if "ImGuiKeyChord" not in hotkey_header or "ImGuiKey_LeftArrow" not in hotkey_header:
     fail("hotkeys must use direct named-key chords rather than numeric VK input")
+for required_binding in (
+    "toggle_comparison",
+    "toggle_display_mode",
+    "toggle_border",
+):
+    if required_binding not in hotkey_header:
+        fail(f"hotkeys are missing {required_binding}")
+
+motion_source = (ROOT / "src/control/split_motion.cpp").read_text(
+    encoding="utf-8"
+)
+if "position = 0.5f" not in motion_source:
+    fail("explicit autosweep stop must restore the split to the center")
+
+label_overlay_source = (ROOT / "src/ui/label_overlay.cpp").read_text(
+    encoding="utf-8"
+)
+if "PushClipRect" not in label_overlay_source or "PopClipRect" not in label_overlay_source:
+    fail("persistent labels must be clipped to their current image regions")
 
 widget_source = (ROOT / "src/ui/parameter_widgets.cpp").read_text(
     encoding="utf-8"

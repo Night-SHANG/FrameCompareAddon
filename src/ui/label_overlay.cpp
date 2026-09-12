@@ -2,6 +2,7 @@
 
 #include "ui/label_overlay.hpp"
 
+#include "capture/reshade_capture.hpp"
 #include "control/split_motion.hpp"
 #include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
@@ -30,10 +31,16 @@ ImU32 black_with_alpha(float opacity) noexcept
 }
 
 void draw_one_label(ImDrawList *draw_list, const ResolvedLabel &label,
-                    const ResolvedLabels &layout, const ImVec2 &display_size)
+                    const ResolvedLabels &layout, const ImVec2 &display_size,
+                    float clip_min_x, float clip_max_x)
 {
-    if (label.text == nullptr || label.text[0] == '\0')
+    if (label.text == nullptr || label.text[0] == '\0' ||
+        clip_max_x <= clip_min_x)
         return;
+
+    draw_list->PushClipRect(
+        ImVec2(clip_min_x * display_size.x, 0.0f),
+        ImVec2(clip_max_x * display_size.x, display_size.y), true);
 
     const float current_font_size = std::max(ImGui::GetFontSize(), 1.0f);
     ImVec2 text_size = ImGui::CalcTextSize(label.text);
@@ -68,6 +75,7 @@ void draw_one_label(ImDrawList *draw_list, const ResolvedLabel &label,
 
     draw_list->AddText(ImGui::GetFont(), layout.font_size, position,
                        white_with_alpha(layout.opacity), label.text);
+    draw_list->PopClipRect();
 }
 }
 
@@ -76,10 +84,13 @@ LabelSettings &label_settings() noexcept
     return g_label_settings;
 }
 
-void draw_labels(reshade::api::effect_runtime *)
+void draw_labels(reshade::api::effect_runtime *runtime)
 {
     auto &compositor = render::settings();
-    input::update_controls(control::split_motion(), compositor.split_position);
+    const auto controls = input::update_controls(
+        control::split_motion(), compositor);
+    if (controls.comparison_disabled)
+        capture::reset_runtime_state(runtime);
     const ResolvedLabels layout = resolve_labels(
         g_label_settings, compositor.before_on_left);
     if (!compositor.enabled || !layout.visible)
@@ -90,7 +101,11 @@ void draw_labels(reshade::api::effect_runtime *)
         return;
 
     ImDrawList *const draw_list = ImGui::GetForegroundDrawList();
-    draw_one_label(draw_list, layout.left, layout, display_size);
-    draw_one_label(draw_list, layout.right, layout, display_size);
+    const LabelClipRegions clips =
+        resolve_label_clip_regions(compositor.split_position);
+    draw_one_label(draw_list, layout.left, layout, display_size,
+                   clips.left_min_x, clips.left_max_x);
+    draw_one_label(draw_list, layout.right, layout, display_size,
+                   clips.right_min_x, clips.right_max_x);
 }
 }

@@ -80,6 +80,29 @@ void positions_can_be_mirrored_in_both_directions()
     require(near(settings.left_x, 0.09f) && near(settings.left_y, 0.35f),
             "right position should mirror horizontally to the left");
 }
+
+void label_regions_follow_and_clamp_the_split_boundary()
+{
+    const auto middle = framecompare::ui::resolve_label_clip_regions(0.35f);
+    require(near(middle.left_min_x, 0.0f) &&
+                near(middle.left_max_x, 0.35f),
+            "left label should be clipped at the split boundary");
+    require(near(middle.right_min_x, 0.35f) &&
+                near(middle.right_max_x, 1.0f),
+            "right label should begin at the split boundary");
+
+    const auto beyond_right =
+        framecompare::ui::resolve_label_clip_regions(2.0f);
+    require(near(beyond_right.left_max_x, 1.0f) &&
+                near(beyond_right.right_min_x, 1.0f),
+            "label regions should clamp a split beyond the right edge");
+
+    const auto beyond_left =
+        framecompare::ui::resolve_label_clip_regions(-1.0f);
+    require(near(beyond_left.left_max_x, 0.0f) &&
+                near(beyond_left.right_min_x, 0.0f),
+            "label regions should clamp a split beyond the left edge");
+}
 }
 
 int main()
@@ -87,5 +110,6 @@ int main()
     semantic_labels_follow_their_current_side();
     layout_values_are_safe_for_the_viewport();
     positions_can_be_mirrored_in_both_directions();
+    label_regions_follow_and_clamp_the_split_boundary();
     std::cout << "label_layout_tests: PASS\n";
 }

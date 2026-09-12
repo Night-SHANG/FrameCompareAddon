@@ -110,6 +110,18 @@ RuntimeCaptureState *state_for(effect_runtime *runtime)
     return runtime->get_private_data<RuntimeCaptureState>();
 }
 
+void reset_runtime_state(effect_runtime *runtime) noexcept
+{
+    RuntimeCaptureState *const state = state_for(runtime);
+    if (state == nullptr)
+        return;
+    state->pair.reset();
+    if (state->cycle)
+        state->cycle->reset();
+    state->before.ready = false;
+    state->after.ready = false;
+}
+
 void on_init_runtime(effect_runtime *runtime)
 {
     RuntimeCaptureState *const state =
@@ -133,15 +145,7 @@ void on_destroy_runtime(effect_runtime *runtime)
 
 void on_reloaded_effects(effect_runtime *runtime)
 {
-    RuntimeCaptureState *const state =
-        runtime->get_private_data<RuntimeCaptureState>();
-    if (state == nullptr)
-        return;
-    state->pair.reset();
-    if (state->cycle)
-        state->cycle->reset();
-    state->before.ready = false;
-    state->after.ready = false;
+    reset_runtime_state(runtime);
 }
 
 void on_begin_effects(effect_runtime *runtime, command_list *commands,

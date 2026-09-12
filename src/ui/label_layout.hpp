@@ -41,8 +41,17 @@ struct ResolvedLabels
     float outline_opacity = 0.85f;
 };
 
+struct LabelClipRegions
+{
+    float left_min_x = 0.0f;
+    float left_max_x = 0.5f;
+    float right_min_x = 0.5f;
+    float right_max_x = 1.0f;
+};
+
 ResolvedLabels resolve_labels(const LabelSettings &settings,
                               bool before_on_left) noexcept;
+LabelClipRegions resolve_label_clip_regions(float split_position) noexcept;
 void mirror_left_to_right(LabelSettings &settings) noexcept;
 void mirror_right_to_left(LabelSettings &settings) noexcept;
 }

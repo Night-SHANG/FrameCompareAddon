@@ -28,6 +28,12 @@ ResolvedLabels resolve_labels(const LabelSettings &settings,
     return result;
 }
 
+LabelClipRegions resolve_label_clip_regions(float split_position) noexcept
+{
+    const float split = std::clamp(split_position, 0.0f, 1.0f);
+    return {0.0f, split, split, 1.0f};
+}
+
 void mirror_left_to_right(LabelSettings &settings) noexcept
 {
     const float left_x = std::clamp(settings.left_x, 0.0f, 1.0f);

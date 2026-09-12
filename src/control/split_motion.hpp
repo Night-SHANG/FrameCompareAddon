@@ -27,7 +27,7 @@ public:
     const MotionSettings &settings() const noexcept;
 
     void start(SweepMode mode, float &position) noexcept;
-    void stop() noexcept;
+    void stop(float &position) noexcept;
     void toggle(float &position) noexcept;
     void update(float &position, float delta_seconds,
                 bool move_left, bool move_right) noexcept;

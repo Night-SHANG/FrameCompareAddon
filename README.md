@@ -12,15 +12,18 @@ FrameCompare v2 is a ReShade add-on for same-frame realtime Before/After compari
 - Draws persistent `OFF` / `ON` labels through the ReShade OSD while comparison is enabled.
 - Allows custom Before/After text, left/right position, font size, opacity and outline style.
 - Keeps semantic labels attached to Before/After when the side order is reversed.
+- Clips each label to its current image region, so the sweep boundary gradually covers the label when that image disappears.
 - Moves the split smoothly while configurable left/right chords are held.
 - Supports left-to-right, right-to-left and ping-pong automatic sweeps.
+- Restores the split to the center when an active sweep is explicitly stopped.
 - Freezes the latest ready Before/After pair while keeping split motion and labels active.
 - Captures hotkeys directly from key presses and shows readable chord names.
+- Provides configurable hotkeys for comparison enable, display mode and border visibility.
 - Pairs every numeric slider with direct number entry and a per-value reset button.
 - Mirrors either label position to the opposite side and offers section-level default resets.
 - Disables capture and composition when the add-on switch is off.
 
-Default controls are `Ctrl+Left` and `Ctrl+Right` for manual movement, `Ctrl+F8` to start or stop the selected automatic sweep, and `Ctrl+F9` to freeze or resume capture. Click a binding in the add-on panel and press a new key or chord to replace it; use the adjacent clear button to unbind it.
+Default controls are `Ctrl+Left` and `Ctrl+Right` for manual movement, `Ctrl+F7` to enable or disable comparison, `Ctrl+F8` to start or stop the selected automatic sweep, `Ctrl+F9` to freeze or resume capture, `Ctrl+F10` to switch display mode, and `Ctrl+F11` to show or hide the border. Explicitly stopping a sweep returns the split to the center. Click a binding in the add-on panel and press a new key or chord to replace it; use the adjacent clear button to unbind it.
 
 For precise tuning, type a value in the number field beside a slider. Each row has its own reset button. Label positions can be mirrored in either direction, and comparison, motion, hotkeys and labels each have a section reset.
 

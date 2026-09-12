@@ -35,4 +35,7 @@ struct ShaderParams
 
 ShaderParams make_shader_params(const CompositorSettings &settings,
                                 bool pair_ready) noexcept;
+bool toggle_enabled(CompositorSettings &settings) noexcept;
+void toggle_display_mode(CompositorSettings &settings) noexcept;
+void toggle_border(CompositorSettings &settings) noexcept;
 }

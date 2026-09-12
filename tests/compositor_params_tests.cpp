@@ -39,5 +39,29 @@ int main()
     require(ready.pair_ready == 1.0f,
             "a ready pair should enable composition");
 
+    require(!framecompare::render::toggle_enabled(settings),
+            "comparison toggle should report the disabled state");
+    require(!settings.enabled,
+            "comparison toggle should disable an enabled comparison");
+    require(framecompare::render::toggle_enabled(settings),
+            "comparison toggle should report the enabled state");
+
+    require(settings.display_mode ==
+                framecompare::render::DisplayMode::same_coordinate_wipe,
+            "same-coordinate wipe should be the default display mode");
+    framecompare::render::toggle_display_mode(settings);
+    require(settings.display_mode == framecompare::render::DisplayMode::center_remap,
+            "display-mode toggle should select center remap");
+    framecompare::render::toggle_display_mode(settings);
+    require(settings.display_mode ==
+                framecompare::render::DisplayMode::same_coordinate_wipe,
+            "display-mode toggle should return to same-coordinate wipe");
+
+    require(settings.show_border,
+            "border should be visible by default");
+    framecompare::render::toggle_border(settings);
+    require(!settings.show_border,
+            "border toggle should hide a visible border");
+
     std::cout << "compositor_params_tests: PASS\n";
 }

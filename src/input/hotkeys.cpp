@@ -140,25 +140,34 @@ void draw_binding_editor(const char *label, ImGuiKeyChord &binding)
     }
 }
 
-void update_controls(control::SplitMotionController &controller,
-                     float &split_position)
+ControlUpdateResult update_controls(
+    control::SplitMotionController &controller,
+    render::CompositorSettings &compositor)
 {
+    ControlUpdateResult result;
     const int frame = ImGui::GetFrameCount();
     if (frame == g_last_update_frame)
-        return;
+        return result;
     g_last_update_frame = frame;
 
     const ImGuiIO &io = ImGui::GetIO();
     if (hotkey_capture_active() || io.WantCaptureKeyboard)
-        return;
+        return result;
 
+    if (chord_pressed(g_bindings.toggle_comparison))
+        result.comparison_disabled = !render::toggle_enabled(compositor);
+    if (chord_pressed(g_bindings.toggle_display_mode))
+        render::toggle_display_mode(compositor);
+    if (chord_pressed(g_bindings.toggle_border))
+        render::toggle_border(compositor);
     if (chord_pressed(g_bindings.toggle_auto))
-        controller.toggle(split_position);
+        controller.toggle(compositor.split_position);
     if (chord_pressed(g_bindings.toggle_freeze))
         controller.settings().frozen = !controller.settings().frozen;
 
-    controller.update(split_position, io.DeltaTime,
+    controller.update(compositor.split_position, io.DeltaTime,
                       chord_down(g_bindings.move_left),
                       chord_down(g_bindings.move_right));
+    return result;
 }
 }

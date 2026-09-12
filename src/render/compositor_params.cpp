@@ -17,4 +17,23 @@ ShaderParams make_shader_params(const CompositorSettings &settings,
     result.pair_ready = settings.enabled && pair_ready ? 1.0f : 0.0f;
     return result;
 }
+
+bool toggle_enabled(CompositorSettings &settings) noexcept
+{
+    settings.enabled = !settings.enabled;
+    return settings.enabled;
+}
+
+void toggle_display_mode(CompositorSettings &settings) noexcept
+{
+    settings.display_mode = settings.display_mode ==
+            DisplayMode::same_coordinate_wipe
+        ? DisplayMode::center_remap
+        : DisplayMode::same_coordinate_wipe;
+}
+
+void toggle_border(CompositorSettings &settings) noexcept
+{
+    settings.show_border = !settings.show_border;
+}
 }

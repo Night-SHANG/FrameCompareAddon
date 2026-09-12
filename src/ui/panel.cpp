@@ -16,16 +16,7 @@ void draw_panel(reshade::api::effect_runtime *runtime)
     auto &settings = render::settings();
     if (ImGui::Checkbox("启用实时对比 / Enable realtime comparison",
                         &settings.enabled) && !settings.enabled)
-    {
-        if (auto *state = capture::state_for(runtime))
-        {
-            state->pair.reset();
-            if (state->cycle)
-                state->cycle->reset();
-            state->before.ready = false;
-            state->after.ready = false;
-        }
-    }
+        capture::reset_runtime_state(runtime);
     const render::CompositorSettings compositor_defaults;
     numeric_setting("分割位置 / Split position", settings.split_position,
                     0.0f, 1.0f, compositor_defaults.split_position, "%.3f");
@@ -70,8 +61,8 @@ void draw_panel(reshade::api::effect_runtime *runtime)
         motion.sweep_mode = static_cast<control::SweepMode>(sweep_mode);
     if (motion.auto_active)
     {
-        if (ImGui::Button("停止自动扫屏 / Stop autosweep"))
-            motion_controller.stop();
+        if (ImGui::Button("停止并回中 / Stop and center"))
+            motion_controller.stop(settings.split_position);
     }
     else if (ImGui::Button("开始自动扫屏 / Start autosweep"))
     {
@@ -85,10 +76,16 @@ void draw_panel(reshade::api::effect_runtime *runtime)
     auto &bindings = input::hotkey_bindings();
     input::draw_binding_editor("左移 / Move left", bindings.move_left);
     input::draw_binding_editor("右移 / Move right", bindings.move_right);
+    input::draw_binding_editor("启用/关闭实时对比 / Toggle comparison",
+                               bindings.toggle_comparison);
     input::draw_binding_editor("自动开始/停止 / Toggle autosweep",
                                bindings.toggle_auto);
     input::draw_binding_editor("冻结/继续 / Toggle freeze",
                                bindings.toggle_freeze);
+    input::draw_binding_editor("切换显示方式 / Toggle display mode",
+                               bindings.toggle_display_mode);
+    input::draw_binding_editor("显示/隐藏分割线 / Toggle border",
+                               bindings.toggle_border);
     if (ImGui::Button("恢复默认快捷键 / Reset default hotkeys"))
         bindings = input::HotkeyBindings{};
 

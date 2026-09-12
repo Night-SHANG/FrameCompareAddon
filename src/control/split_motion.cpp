@@ -31,15 +31,16 @@ void SplitMotionController::start(SweepMode mode, float &position) noexcept
         position = 0.0f;
 }
 
-void SplitMotionController::stop() noexcept
+void SplitMotionController::stop(float &position) noexcept
 {
     settings_.auto_active = false;
+    position = 0.5f;
 }
 
 void SplitMotionController::toggle(float &position) noexcept
 {
     if (settings_.auto_active)
-        stop();
+        stop(position);
     else
         start(settings_.sweep_mode, position);
 }

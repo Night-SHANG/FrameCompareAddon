@@ -29,6 +29,7 @@ struct __declspec(uuid("D10F0929-374E-4820-9498-3F2750A81503")) RuntimeCaptureSt
 };
 
 RuntimeCaptureState *state_for(reshade::api::effect_runtime *runtime);
+void reset_runtime_state(reshade::api::effect_runtime *runtime) noexcept;
 
 void on_init_runtime(reshade::api::effect_runtime *runtime);
 void on_destroy_runtime(reshade::api::effect_runtime *runtime);
