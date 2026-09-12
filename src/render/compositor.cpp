@@ -84,7 +84,7 @@ bool upload_parameters(effect_runtime *runtime, RuntimeCompositorState *state,
         return false;
 
     const ShaderParams params = make_shader_params(g_settings, pair_ready);
-    const std::array<float, 8> values = {
+    std::array<float, 8> values = {
         params.split_position, params.border_width,
         params.border_opacity, params.show_border,
         params.before_on_left, params.display_mode,
