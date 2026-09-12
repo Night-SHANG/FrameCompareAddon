@@ -28,6 +28,8 @@ FrameCompare v2 is a ReShade add-on for same-frame realtime Before/After compari
 - Supports multiple named status indicators with configurable ON/OFF text, position and display duration.
 - Reads the real ReShade effects state directly, while clearly labeling generic ShaderToggler/HDR/RTGI shortcuts as locally tracked state.
 - Disables capture and composition when the add-on switch is off.
+- Organizes settings into six top tabs: Compare, Motion, Hotkeys, Labels, Status and Config.
+- Defaults to Simplified Chinese and can switch the whole interface to English; the selected language persists in `FrameCompare.ini`.
 
 Default controls are `Ctrl+Left` and `Ctrl+Right` for manual movement, `Alt+Left` and `Alt+Right` for center focus, `Ctrl+F7` to enable or disable comparison, `Ctrl+F8` to start or stop the selected automatic sweep, `Ctrl+F9` to freeze or resume capture, `Ctrl+F10` to switch display mode, and `Ctrl+F11` to show or hide the border. Explicitly stopping a sweep returns the split to the center. Click a binding in the add-on panel and press a new key or chord to replace it; use the adjacent clear button to unbind it.
 
@@ -37,7 +39,7 @@ Center remap uses a `0.5` source focus by default. Lower values move both compar
 
 ## Configuration and status indicators
 
-`FrameCompare.ini` is created beside `00-FrameCompare-v2.addon64`. Stable changes are saved automatically after a short delay and again when the add-on unloads. The panel also provides Save now and Reload buttons. Copy this file with the add-on to reuse layout, controls and HUD entries in another game.
+`FrameCompare.ini` is created beside the add-on. Stable changes, including the interface language, are saved automatically after a short delay and again when the add-on unloads. The Config tab also provides Save now and Reload buttons. Copy this file with the add-on to reuse layout, controls and HUD entries in another game.
 
 Each custom status entry can either read the actual ReShade effects state or track a shared external shortcut. The ReShade source follows `effect_runtime::get_effects_state()` and therefore does not need a duplicate `END` binding. A tracked shortcut is suitable for ShaderToggler groups and shader toggles such as HDR or RTGI, but starts from the configured initial state and cannot verify the other add-on's state if a key press is missed or the external state changes elsewhere.
 
@@ -47,7 +49,7 @@ The generic source is deliberately labeled `Pre-ReShade FX`. It is not claimed t
 
 ## Build
 
-GitHub Actions is the authoritative build environment. The workflow uses Windows Server 2022, Visual Studio, CMake and ReShade API v6.8.0.
+GitHub Actions is the authoritative build environment. The workflow uses Windows Server 2022, Visual Studio, CMake and ReShade API v6.8.0. Every build verifies both x64 and Win32; version tags matching `v*.*.*` publish a GitHub Release only after both architectures pass.
 
 For core-only local tests with CMake:
 
@@ -60,7 +62,8 @@ ctest --test-dir build-tests -C Release --output-on-failure
 The uploaded artifact contains:
 
 ```text
-00-FrameCompare-v2.addon64
+00-FrameCompare-v2.addon64 (x64 package)
+00-FrameCompare-v2.addon32 (x86 package)
 FrameCompare.ini.example
 reshade-shaders/Shaders/FrameCompare.fx
 ```

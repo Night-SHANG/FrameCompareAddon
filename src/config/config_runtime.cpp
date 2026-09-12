@@ -19,7 +19,7 @@ using Clock = std::chrono::steady_clock;
 std::filesystem::path g_path;
 std::string g_saved;
 std::string g_pending;
-std::string g_status;
+ConfigStatus g_status = ConfigStatus::none;
 Clock::time_point g_pending_since = Clock::now();
 bool g_initialized = false;
 
@@ -99,12 +99,12 @@ bool save_now()
     const std::string current = encode_current_settings();
     if (!write_file(g_path, current))
     {
-        g_status = "无法写入 FrameCompare.ini / Unable to write configuration";
+        g_status = ConfigStatus::save_failed;
         return false;
     }
     g_saved = current;
     g_pending.clear();
-    g_status = "已保存 FrameCompare.ini / Configuration saved";
+    g_status = ConfigStatus::saved;
     return true;
 }
 
@@ -115,17 +115,17 @@ bool reload_now()
     const std::string content = read_file(g_path);
     if (content.empty())
     {
-        g_status = "无法读取 FrameCompare.ini / Unable to read configuration";
+        g_status = ConfigStatus::reload_failed;
         return false;
     }
     decode_current_settings(content);
     g_saved = encode_current_settings();
     g_pending.clear();
-    g_status = "已重新读取 FrameCompare.ini / Configuration reloaded";
+    g_status = ConfigStatus::reloaded;
     return true;
 }
 
-const std::string &status_message() noexcept
+ConfigStatus status() noexcept
 {
     return g_status;
 }

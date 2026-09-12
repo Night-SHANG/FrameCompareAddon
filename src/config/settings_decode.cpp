@@ -6,6 +6,7 @@
 #include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
+#include "ui/i18n/localization.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -69,6 +70,12 @@ public:
         return fallback;
     }
 
+    std::string value(const char *section, const char *key,
+                      std::string fallback) const
+    {
+        return document_.get(section, key).value_or(fallback);
+    }
+
     template <std::size_t Size>
     void text(const char *section, const char *key,
               std::array<char, Size> &destination) const
@@ -109,6 +116,9 @@ void decode_current_settings(std::string_view text)
 {
     const IniDocument document = IniDocument::parse(text);
     const Reader reader(document);
+
+    ui::i18n::set_language(ui::i18n::parse_language(
+        reader.value("UI", "Language", "zh-CN")));
 
     auto &compositor = render::settings();
     compositor = render::CompositorSettings{};

@@ -5,6 +5,7 @@
 
 #include "hud/indicator_model.hpp"
 #include "input/hotkeys.hpp"
+#include "ui/i18n/localization.hpp"
 #include "ui/parameter_widgets.hpp"
 
 #include <string>
@@ -13,15 +14,16 @@ namespace framecompare::hud
 {
 void draw_indicator_panel()
 {
-    ImGui::Separator();
-    ImGui::TextUnformatted("自定义状态提示 / Custom status indicators");
-    ImGui::TextWrapped(
-        "ReShade 状态直接读取真实效果开关；快捷键跟踪只根据相同按键"
-        "翻转，不能验证外部插件的真实状态。 / ReShade state is read "
-        "directly; tracked hotkeys cannot verify another add-on's state.");
+    using ui::i18n::TextId;
+    const auto t = [](TextId id) { return ui::i18n::text(id); };
+    const auto l = [](TextId id, const char *stable_id) {
+        return ui::i18n::label(id, stable_id);
+    };
+    ImGui::TextWrapped("%s", t(TextId::status_help));
 
     auto &items = indicators();
-    if (ImGui::Button("新增状态条目 / Add status item") &&
+    const std::string add = l(TextId::add_status_item, "add-status-item");
+    if (ImGui::Button(add.c_str()) &&
         items.size() < maximum_indicators)
     {
         Indicator item;
@@ -38,7 +40,8 @@ void draw_indicator_panel()
         const bool open = ImGui::TreeNodeEx(
             title.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
         ImGui::SameLine();
-        if (ImGui::SmallButton("移除 / Remove"))
+        const std::string remove = l(TextId::remove, "remove-status-item");
+        if (ImGui::SmallButton(remove.c_str()))
         {
             input::cancel_hotkey_capture();
             items.erase(items.begin() + static_cast<std::ptrdiff_t>(index));
@@ -48,15 +51,18 @@ void draw_indicator_panel()
 
         if (open)
         {
-            ImGui::Checkbox("启用 / Enabled", &item.enabled);
-            ImGui::InputText("名称 / Name", item.name.data(),
+            const std::string enabled = l(TextId::enabled, "status-enabled");
+            const std::string name = l(TextId::name, "status-name");
+            ImGui::Checkbox(enabled.c_str(), &item.enabled);
+            ImGui::InputText(name.c_str(), item.name.data(),
                              item.name.size());
 
             int source = static_cast<int>(item.source);
             const char *sources[] = {
-                "快捷键跟踪状态 / Tracked hotkey state",
-                "ReShade 实际效果状态 / Actual ReShade effects state"};
-            if (ImGui::Combo("状态来源 / State source", &source, sources, 2))
+                t(TextId::source_tracked_hotkey), t(TextId::source_reshade)};
+            const std::string source_label = l(TextId::state_source,
+                                                "status-source");
+            if (ImGui::Combo(source_label.c_str(), &source, sources, 2))
             {
                 input::cancel_hotkey_capture();
                 item.source = static_cast<IndicatorSource>(source);
@@ -67,38 +73,40 @@ void draw_indicator_panel()
             {
                 ImGuiKeyChord chord =
                     static_cast<ImGuiKeyChord>(item.hotkey_chord);
-                const std::string label = "快捷键 / Hotkey #" +
-                                          std::to_string(index + 1);
-                if (input::draw_binding_editor(label.c_str(), chord))
+                const std::string stable_id = "status-hotkey-" +
+                                              std::to_string(index);
+                if (input::draw_binding_editor(t(TextId::hotkey),
+                                               stable_id.c_str(), chord))
                 {
                     item.hotkey_chord = static_cast<std::uint32_t>(chord);
                     reset_indicator_runtime(item);
                 }
-                if (ImGui::Checkbox("初始状态为 ON / Initial state ON",
-                                    &item.initial_on))
+                const std::string initial = l(TextId::initial_state_on,
+                                              "status-initial-on");
+                if (ImGui::Checkbox(initial.c_str(), &item.initial_on))
                     reset_indicator_runtime(item);
             }
             else
             {
-                ImGui::TextDisabled(
-                    "直接读取 ReShade 当前状态，无需绑定 END。"
-                    " / Reads ReShade directly; no END binding needed.");
+                ImGui::TextDisabled("%s", t(TextId::reshade_source_help));
             }
 
-            ImGui::InputText("ON 文字 / ON text", item.text_on.data(),
+            const std::string on_text = l(TextId::on_text, "status-on-text");
+            const std::string off_text = l(TextId::off_text, "status-off-text");
+            ImGui::InputText(on_text.c_str(), item.text_on.data(),
                              item.text_on.size());
-            ImGui::InputText("OFF 文字 / OFF text", item.text_off.data(),
+            ImGui::InputText(off_text.c_str(), item.text_off.data(),
                              item.text_off.size());
             const Indicator defaults;
-            ui::numeric_setting("X", item.x, 0.0f, 1.0f,
+            ui::numeric_setting(t(TextId::x), "status-x", item.x, 0.0f, 1.0f,
                                 defaults.x, "%.3f");
-            ui::numeric_setting("Y", item.y, 0.0f, 1.0f,
+            ui::numeric_setting(t(TextId::y), "status-y", item.y, 0.0f, 1.0f,
                                 defaults.y, "%.3f");
             ui::numeric_setting(
-                "显示秒数（0=常驻） / Seconds (0=persistent)",
+                t(TextId::show_seconds), "status-show-seconds",
                 item.show_seconds, 0.0f, 60.0f,
                 defaults.show_seconds, "%.1f");
-            ImGui::TextDisabled("当前状态 / Current state: %s",
+            ImGui::TextDisabled("%s: %s", t(TextId::current_state),
                                 item.runtime_on ? "ON" : "OFF");
             ImGui::TreePop();
         }

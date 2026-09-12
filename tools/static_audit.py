@@ -40,12 +40,17 @@ REQUIRED = (
     "src/ui/label_overlay.cpp",
     "src/ui/parameter_widgets.hpp",
     "src/ui/parameter_widgets.cpp",
+    "src/ui/i18n/localization.hpp",
+    "src/ui/i18n/localization.cpp",
+    "src/ui/pages/panel_pages.hpp",
+    "src/ui/pages/panel_pages.cpp",
     "src/ui/panel.hpp",
     "src/ui/panel.cpp",
     "tests/label_layout_tests.cpp",
     "tests/split_motion_tests.cpp",
     "tests/ini_document_tests.cpp",
     "tests/indicator_model_tests.cpp",
+    "tests/localization_tests.cpp",
     "shaders/FrameCompare.fx",
     ".github/workflows/build.yml",
 )
@@ -98,16 +103,24 @@ if "CaptureProvenance::pre_reshade_fx" not in capture_source:
     fail("generic Before capture lacks explicit pre-ReShade provenance")
 
 panel_source = (ROOT / "src/ui/panel.cpp").read_text(encoding="utf-8")
-if "not verified Vanilla" not in panel_source:
+pages_source = (ROOT / "src/ui/pages/panel_pages.cpp").read_text(encoding="utf-8")
+localization_source = (ROOT / "src/ui/i18n/localization.cpp").read_text(
+    encoding="utf-8"
+)
+if "vanilla_warning" not in pages_source:
     fail("panel does not disclose the generic Before limitation")
-if "mirror_left_to_right" not in panel_source or "mirror_right_to_left" not in panel_source:
+if "mirror_left_to_right" not in pages_source or "mirror_right_to_left" not in pages_source:
     fail("panel is missing two-way label position mirroring")
-
+if panel_source.count("BeginTabItem") != 6:
+    fail("panel must expose exactly six top-level setting tabs")
 indicator_panel_source = (ROOT / "src/hud/indicator_panel.cpp").read_text(
     encoding="utf-8"
 )
 if "###status-item" not in indicator_panel_source:
     fail("editable indicator titles must keep a stable ImGui ID")
+for source in (panel_source, pages_source, indicator_panel_source):
+    if " / " in source:
+        fail("setting pages must not mix Chinese and English labels")
 
 entry_source = (ROOT / "src/addon_entry.cpp").read_text(encoding="utf-8")
 if 'register_overlay("OSD", framecompare::ui::draw_labels)' not in entry_source:
@@ -171,9 +184,23 @@ if "PushClipRect" not in label_overlay_source or "PopClipRect" not in label_over
 widget_source = (ROOT / "src/ui/parameter_widgets.cpp").read_text(
     encoding="utf-8"
 )
-for required_widget in ("SliderFloat", "InputFloat", "重置 / Reset"):
+for required_widget in ("SliderFloat", "InputFloat", "i18n::TextId::reset"):
     if required_widget not in widget_source:
         fail("numeric settings must provide slider, number input and reset")
+
+for requirement in (".addon32", ".addon64", "CMAKE_SIZEOF_VOID_P"):
+    if requirement not in cmake_source:
+        fail(f"dual-architecture CMake packaging is missing {requirement}")
+
+workflow_source = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+for requirement in ("Win32", "x64", '"v*.*.*"', "contents: write",
+                    "needs: windows", "gh release create", "SHA256SUMS.txt"):
+    if requirement not in workflow_source:
+        fail(f"release workflow is missing {requirement}")
+
+if 'document.set("UI", "Language"' not in (
+        ROOT / "src/config/settings_encode.cpp").read_text(encoding="utf-8"):
+    fail("interface language is not persisted in FrameCompare.ini")
 
 shader_source = (ROOT / "shaders/FrameCompare.fx").read_text(encoding="utf-8")
 if "FRAMECOMPARE_BEFORE" not in shader_source or "FRAMECOMPARE_AFTER" not in shader_source:

@@ -2,12 +2,27 @@ name: Build FrameCompare v2
 
 on:
   push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  windows-x64:
+  windows:
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cmake_arch: x64
+            package_arch: x64
+          - cmake_arch: Win32
+            package_arch: x86
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,7 +31,7 @@ jobs:
         run: python tools/static_audit.py
 
       - name: Configure tests
-        run: cmake -S . -B build-tests -A x64 -DFRAMECOMPARE_BUILD_ADDON=OFF
+        run: cmake -S . -B build-tests -A ${{ matrix.cmake_arch }} -DFRAMECOMPARE_BUILD_ADDON=OFF
 
       - name: Build tests
         run: cmake --build build-tests --config Release --parallel
@@ -25,7 +40,7 @@ jobs:
         run: ctest --test-dir build-tests -C Release --output-on-failure
 
       - name: Configure add-on
-        run: cmake -S . -B build-addon -A x64 -DFRAMECOMPARE_BUILD_TESTS=ON
+        run: cmake -S . -B build-addon -A ${{ matrix.cmake_arch }} -DFRAMECOMPARE_BUILD_TESTS=ON
 
       - name: Build add-on
         run: cmake --build build-addon --config Release --parallel
@@ -36,6 +51,43 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: FrameCompare-v2-windows-x64
+          name: FrameCompare-v2-windows-${{ matrix.package_arch }}
           path: build-addon/Release/package/
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: FrameCompare-v2-windows-*
+          path: release-input
+
+      - name: Create archives and checksums
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Compress-Archive -Path "release-input/FrameCompare-v2-windows-x64/*" -DestinationPath "release-assets/FrameCompare-$tag-windows-x64.zip"
+          Compress-Archive -Path "release-input/FrameCompare-v2-windows-x86/*" -DestinationPath "release-assets/FrameCompare-$tag-windows-x86.zip"
+          Get-ChildItem -LiteralPath release-assets -Filter *.zip | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding ascii
+
+      - name: Publish immutable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (gh release view $tag 2>$null) {
+            throw "Release $tag already exists; refusing to overwrite it."
+          }
+          $assets = @(Get-ChildItem -LiteralPath release-assets -File | Select-Object -ExpandProperty FullName)
+          gh release create $tag @assets --verify-tag --title "FrameCompare $tag" --generate-notes

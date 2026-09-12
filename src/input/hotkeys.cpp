@@ -2,6 +2,7 @@
 #include <reshade.hpp>
 
 #include "input/hotkeys.hpp"
+#include "ui/i18n/localization.hpp"
 
 #include <string>
 
@@ -83,7 +84,7 @@ std::string chord_name(ImGuiKeyChord chord)
 {
     const ImGuiKey key = chord_key(chord);
     if (key == ImGuiKey_None)
-        return "未设置 / Unbound";
+        return ui::i18n::text(ui::i18n::TextId::unbound);
 
     std::string result;
     if ((chord & ImGuiMod_Ctrl) != 0)
@@ -121,29 +122,31 @@ bool binding_pressed(ImGuiKeyChord binding) noexcept
            chord_pressed(binding);
 }
 
-bool draw_binding_editor(const char *label, ImGuiKeyChord &binding)
+bool draw_binding_editor(const char *label, const char *stable_id,
+                         ImGuiKeyChord &binding)
 {
     bool changed = false;
     ImGui::TextUnformatted(label);
     ImGui::SameLine();
     const std::string name = chord_name(binding);
-    const std::string button_label = name + "##" + label;
+    const std::string button_label = name + "##binding-" + stable_id;
     if (ImGui::Button(button_label.c_str()))
-        g_capture_label = label;
+        g_capture_label = stable_id;
     ImGui::SameLine();
-    const std::string clear_label = std::string("清除 / Clear##") + label;
+    const std::string clear_label = ui::i18n::label(
+        ui::i18n::TextId::clear, std::string("clear-") + stable_id);
     if (ImGui::Button(clear_label.c_str()))
     {
         binding = ImGuiKey_None;
-        if (g_capture_label == label)
+        if (g_capture_label == stable_id)
             g_capture_label.clear();
         changed = true;
     }
 
-    if (g_capture_label == label)
+    if (g_capture_label == stable_id)
     {
         ImGui::SameLine();
-        ImGui::TextUnformatted("请按键 / Press a key...");
+        ImGui::TextUnformatted(ui::i18n::text(ui::i18n::TextId::press_key));
         const ImGuiKeyChord captured = capture_pressed_chord();
         if (captured != ImGuiKey_None)
         {

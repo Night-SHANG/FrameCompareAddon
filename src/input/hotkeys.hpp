@@ -29,7 +29,8 @@ HotkeyBindings &hotkey_bindings() noexcept;
 bool hotkey_capture_active() noexcept;
 void cancel_hotkey_capture() noexcept;
 bool binding_pressed(ImGuiKeyChord binding) noexcept;
-bool draw_binding_editor(const char *label, ImGuiKeyChord &binding);
+bool draw_binding_editor(const char *label, const char *stable_id,
+                         ImGuiKeyChord &binding);
 ControlUpdateResult update_controls(
     control::SplitMotionController &controller,
     render::CompositorSettings &compositor);

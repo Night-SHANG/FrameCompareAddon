@@ -1,6 +1,9 @@
 ; FrameCompare v2 portable configuration example (UTF-8)
 ; Configure shortcuts from the in-game key capture UI.
 
+[UI]
+Language=zh-CN
+
 [General]
 Enabled=1
 BeforeOnLeft=1

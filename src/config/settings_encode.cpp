@@ -6,6 +6,7 @@
 #include "input/hotkeys.hpp"
 #include "render/compositor.hpp"
 #include "ui/label_overlay.hpp"
+#include "ui/i18n/localization.hpp"
 
 #include <iomanip>
 #include <sstream>
@@ -35,6 +36,8 @@ std::string chord(ImGuiKeyChord value)
 std::string encode_current_settings()
 {
     IniDocument document;
+    document.set("UI", "Language", ui::i18n::language_code(
+        ui::i18n::language()));
     const auto &compositor = render::settings();
     document.set("General", "Enabled", boolean(compositor.enabled));
     document.set("General", "BeforeOnLeft",

@@ -19,6 +19,7 @@ add_library(framecompare_core STATIC
     src/core/frame_pair.cpp
     src/hud/indicator_model.cpp
     src/render/compositor_params.cpp
+    src/ui/i18n/localization.cpp
     src/ui/label_layout.cpp
 )
 target_include_directories(framecompare_core PUBLIC src)
@@ -48,11 +49,23 @@ if(FRAMECOMPARE_BUILD_TESTS)
     add_executable(indicator_model_tests tests/indicator_model_tests.cpp)
     target_link_libraries(indicator_model_tests PRIVATE framecompare_core)
     add_test(NAME indicator_model_tests COMMAND indicator_model_tests)
+
+    add_executable(localization_tests tests/localization_tests.cpp)
+    target_link_libraries(localization_tests PRIVATE framecompare_core)
+    add_test(NAME localization_tests COMMAND localization_tests)
 endif()
 
 if(FRAMECOMPARE_BUILD_ADDON)
     if(NOT WIN32)
         message(FATAL_ERROR "FrameCompare v2 add-on requires Windows.")
+    endif()
+
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(FRAMECOMPARE_ADDON_SUFFIX ".addon64")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(FRAMECOMPARE_ADDON_SUFFIX ".addon32")
+    else()
+        message(FATAL_ERROR "Unsupported pointer size for a ReShade add-on.")
     endif()
 
     include(FetchContent)
@@ -82,6 +95,7 @@ if(FRAMECOMPARE_BUILD_ADDON)
         src/ui/label_overlay.cpp
         src/ui/parameter_widgets.cpp
         src/ui/panel.cpp
+        src/ui/pages/panel_pages.cpp
     )
     target_include_directories(FrameCompareV2 PRIVATE
         src
@@ -100,13 +114,13 @@ if(FRAMECOMPARE_BUILD_ADDON)
     set_target_properties(FrameCompareV2 PROPERTIES
         PREFIX ""
         OUTPUT_NAME "00-FrameCompare-v2"
-        SUFFIX ".addon64"
+        SUFFIX "${FRAMECOMPARE_ADDON_SUFFIX}"
     )
     add_custom_command(TARGET FrameCompareV2 POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:FrameCompareV2>/package/reshade-shaders/Shaders"
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:FrameCompareV2>"
-            "$<TARGET_FILE_DIR:FrameCompareV2>/package/00-FrameCompare-v2.addon64"
+            "$<TARGET_FILE_DIR:FrameCompareV2>/package/$<TARGET_FILE_NAME:FrameCompareV2>"
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_SOURCE_DIR}/shaders/FrameCompare.fx"
             "$<TARGET_FILE_DIR:FrameCompareV2>/package/reshade-shaders/Shaders/FrameCompare.fx"
