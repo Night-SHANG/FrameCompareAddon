@@ -2,6 +2,7 @@
 
 #include "capture/reshade_capture.hpp"
 #include "render/compositor.hpp"
+#include "ui/label_overlay.hpp"
 #include "ui/panel.hpp"
 
 #include <Windows.h>
@@ -79,12 +80,14 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(
         on_reloaded_effects);
     reshade::register_overlay(nullptr, framecompare::ui::draw_panel);
+    reshade::register_overlay("OSD", framecompare::ui::draw_labels);
     return true;
 }
 
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module,
                                                     HMODULE reshade_module)
 {
+    reshade::unregister_overlay("OSD", framecompare::ui::draw_labels);
     reshade::unregister_overlay(nullptr, framecompare::ui::draw_panel);
     reshade::unregister_event<reshade::addon_event::reshade_reloaded_effects>(
         on_reloaded_effects);

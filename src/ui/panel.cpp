@@ -4,6 +4,7 @@
 
 #include "capture/reshade_capture.hpp"
 #include "render/compositor.hpp"
+#include "ui/label_overlay.hpp"
 
 namespace framecompare::ui
 {
@@ -39,6 +40,31 @@ void draw_panel(reshade::api::effect_runtime *runtime)
                        0.0f, 0.02f, "%.4f");
     ImGui::SliderFloat("线透明度 / Border opacity",
                        &settings.border_opacity, 0.0f, 1.0f, "%.2f");
+
+    auto &labels = label_settings();
+    ImGui::Separator();
+    ImGui::TextUnformatted("常驻标签 / Persistent labels");
+    ImGui::Checkbox("显示标签 / Show labels", &labels.visible);
+    ImGui::InputText("Before 文字 / Before text",
+                     labels.before_text.data(), labels.before_text.size());
+    ImGui::InputText("After 文字 / After text",
+                     labels.after_text.data(), labels.after_text.size());
+    ImGui::SliderFloat("左侧 X / Left X", &labels.left_x,
+                       0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("左侧 Y / Left Y", &labels.left_y,
+                       0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("右侧 X / Right X", &labels.right_x,
+                       0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("右侧 Y / Right Y", &labels.right_y,
+                       0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("字号 / Font size", &labels.font_size,
+                       8.0f, 192.0f, "%.0f");
+    ImGui::SliderFloat("文字透明度 / Text opacity", &labels.opacity,
+                       0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("描边宽度 / Outline width", &labels.outline_width,
+                       0.0f, 8.0f, "%.1f");
+    ImGui::SliderFloat("描边透明度 / Outline opacity",
+                       &labels.outline_opacity, 0.0f, 1.0f, "%.2f");
 
     const auto *state = capture::state_for(runtime);
     const bool ready = state != nullptr && state->pair.ready();

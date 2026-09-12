@@ -16,8 +16,13 @@ REQUIRED = (
     "src/render/compositor.cpp",
     "src/render/compositor_params.hpp",
     "src/render/compositor_params.cpp",
+    "src/ui/label_layout.hpp",
+    "src/ui/label_layout.cpp",
+    "src/ui/label_overlay.hpp",
+    "src/ui/label_overlay.cpp",
     "src/ui/panel.hpp",
     "src/ui/panel.cpp",
+    "tests/label_layout_tests.cpp",
     "shaders/FrameCompare.fx",
     ".github/workflows/build.yml",
 )
@@ -54,6 +59,11 @@ require_include_before(
     "#include <imgui.h>",
     '#include "ui/panel.hpp"',
 )
+require_include_before(
+    "src/ui/label_overlay.cpp",
+    "#include <imgui.h>",
+    '#include "ui/label_overlay.hpp"',
+)
 
 for folder in (ROOT / "src").iterdir():
     if not folder.is_dir():
@@ -71,6 +81,14 @@ if "CaptureProvenance::pre_reshade_fx" not in capture_source:
 panel_source = (ROOT / "src/ui/panel.cpp").read_text(encoding="utf-8")
 if "not verified Vanilla" not in panel_source:
     fail("panel does not disclose the generic Before limitation")
+
+entry_source = (ROOT / "src/addon_entry.cpp").read_text(encoding="utf-8")
+if 'register_overlay("OSD", framecompare::ui::draw_labels)' not in entry_source:
+    fail("persistent labels are not registered with the ReShade OSD")
+
+label_header = (ROOT / "src/ui/label_layout.hpp").read_text(encoding="utf-8")
+if "'O', 'F', 'F'" not in label_header or "'O', 'N'" not in label_header:
+    fail("persistent labels must default to OFF and ON")
 
 shader_source = (ROOT / "shaders/FrameCompare.fx").read_text(encoding="utf-8")
 if "FRAMECOMPARE_BEFORE" not in shader_source or "FRAMECOMPARE_AFTER" not in shader_source:

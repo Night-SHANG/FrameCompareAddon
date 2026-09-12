@@ -16,6 +16,7 @@ add_library(framecompare_core STATIC
     src/core/capture_cycle.cpp
     src/core/frame_pair.cpp
     src/render/compositor_params.cpp
+    src/ui/label_layout.cpp
 )
 target_include_directories(framecompare_core PUBLIC src)
 
@@ -28,6 +29,10 @@ if(FRAMECOMPARE_BUILD_TESTS)
     add_executable(compositor_params_tests tests/compositor_params_tests.cpp)
     target_link_libraries(compositor_params_tests PRIVATE framecompare_core)
     add_test(NAME compositor_params_tests COMMAND compositor_params_tests)
+
+    add_executable(label_layout_tests tests/label_layout_tests.cpp)
+    target_link_libraries(label_layout_tests PRIVATE framecompare_core)
+    add_test(NAME label_layout_tests COMMAND label_layout_tests)
 endif()
 
 if(FRAMECOMPARE_BUILD_ADDON)
@@ -53,6 +58,7 @@ if(FRAMECOMPARE_BUILD_ADDON)
         src/addon_entry.cpp
         src/capture/reshade_capture.cpp
         src/render/compositor.cpp
+        src/ui/label_overlay.cpp
         src/ui/panel.cpp
     )
     target_include_directories(FrameCompareV2 PRIVATE
