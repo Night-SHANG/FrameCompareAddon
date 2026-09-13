@@ -81,5 +81,17 @@ int main()
     require(!settings.show_border,
             "border toggle should hide a visible border");
 
+    using framecompare::render::center_source_center;
+    require(center_source_center(0.5f, 0.0f) == 0.25f,
+            "leftmost focus should keep a half-width window in bounds");
+    require(center_source_center(0.5f, 0.5f) == 0.5f,
+            "default focus should keep the source centered");
+    require(center_source_center(0.5f, 1.0f) == 0.75f,
+            "rightmost focus should keep a half-width window in bounds");
+    require(center_source_center(0.8f, 0.0f) == 0.4f,
+            "uneven splits should use the wider source window boundary");
+    require(center_source_center(0.8f, 1.0f) == 0.6f,
+            "uneven splits should stay inside the right boundary");
+
     std::cout << "compositor_params_tests: PASS\n";
 }

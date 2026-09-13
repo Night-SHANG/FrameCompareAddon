@@ -38,13 +38,25 @@ void center_mode_requires_a_fresh_complete_capture()
                 BeforeSource::dlss_input,
             "a fresh center capture should become the Before source");
 }
+
+void first_pass_is_latched_until_the_frame_is_consumed()
+{
+    FirstPassLatch latch;
+    require(latch.try_reserve(), "the first pass should reserve capture");
+    require(!latch.try_reserve(),
+            "later passes should preserve the first captured input");
+    require(latch.pending(), "the first pass should remain pending");
+    latch.release();
+    require(!latch.pending(), "consumption should release the latch");
+    require(latch.try_reserve(), "the next frame should capture again");
+}
 }
 
 int main()
 {
     generic_modes_keep_the_generic_before();
     center_mode_requires_a_fresh_complete_capture();
+    first_pass_is_latched_until_the_frame_is_consumed();
     std::cout << "DLSS5 center source policy tests passed.\n";
     return 0;
 }
-

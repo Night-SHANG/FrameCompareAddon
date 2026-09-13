@@ -53,6 +53,7 @@ std::string_view copy_outcome_name(CopyOutcome outcome) noexcept
     case CopyOutcome::empty_region: return "empty-region";
     case CopyOutcome::device_mismatch: return "device-mismatch";
     case CopyOutcome::guarded_failure: return "guarded-failure";
+    case CopyOutcome::retained_first_pass: return "first-pass-retained";
     case CopyOutcome::none:
     default: return "none";
     }

@@ -39,7 +39,7 @@ Default controls are `Ctrl+Left` and `Ctrl+Right` for manual movement, `Alt+Left
 
 For precise tuning, type a value in the number field beside a slider. Each row has its own reset button. Label positions can be mirrored in either direction, and comparison, motion, hotkeys and labels each have a section reset.
 
-Center remap uses a `0.5` source focus by default. Lower values move both compared views toward the original image's left side, while higher values move them toward the right. Automatic sweep remains available in this mode, but the panel marks the combination as not recommended because center remap is intended for aligned subject comparison.
+Center remap uses a `0.5` source focus by default. Lower values move both compared views toward the original image's left side, while higher values move them toward the right. The focus is mapped into the widest range that keeps both source windows inside the frame, preventing edge pixels from stretching into horizontal bands. Automatic sweep remains available in this mode, but the panel marks the combination as not recommended because center remap is intended for aligned subject comparison.
 
 ## Configuration and status indicators
 
@@ -70,13 +70,17 @@ hotkeys continue to use the existing FrameCompare settings. In center-remap
 mode, FrameCompare captures the complete `DLSSNR.Color` resource and copies it
 into its own stable Before texture when a new comparison pair is created. The
 existing center-focus UV calculation is then applied to that texture, so freeze
-and unfreeze retain the same behavior as the generic center-remap path.
+and unfreeze retain the same behavior as the generic center-remap path. When a
+frame contains multiple DLSSNR passes, the bridge retains the first pass input
+until FrameCompare consumes it; later passes cannot replace Before with an
+already processed DLSS image.
 
 The integration is fail-open. A missing module, missing parameter, incompatible
 resource, unavailable shared bridge, existing detour or hook failure leaves the
 original NGX result and generic FrameCompare path available. D3D12 same-coordinate
-region copying was validated in game with DLSS5 still operational. D3D11 and the
-new D3D12-to-D3D11 center bridge still need in-game validation.
+region copying was validated in game with DLSS5 still operational. The
+D3D12-to-D3D11 center bridge was validated in game with one DLSSNR pass. The
+first-pass latch for multi-pass DLSSNR and D3D11 still need in-game validation.
 
 ## Installation and DLSS5 test
 

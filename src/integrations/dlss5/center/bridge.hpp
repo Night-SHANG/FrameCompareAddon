@@ -55,6 +55,6 @@ CopyOutcome capture_d3d12(ID3D12GraphicsCommandList *commands,
                           ID3D12Resource *color) noexcept;
 SourceLease acquire_latest(reshade::api::effect_runtime *runtime,
                            std::uint64_t consumed_generation);
+void discard_pending(reshade::api::effect_runtime *runtime = nullptr) noexcept;
 BridgeSnapshot bridge_snapshot();
 }
-

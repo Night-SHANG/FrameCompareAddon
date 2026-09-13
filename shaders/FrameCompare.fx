@@ -13,12 +13,21 @@ float4 ReadParams(int index)
     return tex2D(ParamsSampler, float2((index + 0.5) / 2.0, 0.5));
 }
 
+float CenterSource(float split, float center_focus)
+{
+    split = saturate(split);
+    const float widest_region = max(split, 1.0 - split);
+    const float minimum_center = widest_region * 0.5;
+    return lerp(minimum_center, 1.0 - minimum_center,
+                saturate(center_focus));
+}
+
 float2 BeforeUV(float2 uv, float split, bool before_left, int mode,
                 float center_focus)
 {
     if (mode == 0)
         return uv;
-    uv.x += saturate(center_focus) - 0.5;
+    uv.x += CenterSource(split, center_focus) - 0.5;
     uv.x = before_left
         ? saturate(uv.x + 0.5 * (1.0 - split))
         : saturate(uv.x - 0.5 * split);
@@ -30,7 +39,7 @@ float2 AfterUV(float2 uv, float split, bool before_left, int mode,
 {
     if (mode == 0)
         return uv;
-    uv.x += saturate(center_focus) - 0.5;
+    uv.x += CenterSource(split, center_focus) - 0.5;
     uv.x = before_left
         ? saturate(uv.x - 0.5 * split)
         : saturate(uv.x + 0.5 * (1.0 - split));

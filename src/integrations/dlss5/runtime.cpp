@@ -58,7 +58,7 @@ void record_result(Api api, CopyOutcome outcome, CopyRegion region) noexcept
     {
         if (outcome == CopyOutcome::applied)
             ++applied;
-        else
+        else if (outcome != CopyOutcome::retained_first_pass)
             ++skipped;
     }
     g_diagnostics.last_api = api;

@@ -19,6 +19,16 @@ struct SourceConditions
     std::uint64_t consumed_generation = 0;
 };
 
+class FirstPassLatch
+{
+public:
+    bool try_reserve() noexcept;
+    bool pending() const noexcept;
+    void release() noexcept;
+
+private:
+    bool pending_ = false;
+};
+
 BeforeSource select_source(SourceConditions conditions) noexcept;
 }
-

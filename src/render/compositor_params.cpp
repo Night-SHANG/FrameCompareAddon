@@ -19,6 +19,15 @@ ShaderParams make_shader_params(const CompositorSettings &settings,
     return result;
 }
 
+float center_source_center(float split_position, float center_focus) noexcept
+{
+    const float split = std::clamp(split_position, 0.0f, 1.0f);
+    const float widest_window = std::max(split, 1.0f - split);
+    const float minimum_center = widest_window * 0.5f;
+    const float focus = std::clamp(center_focus, 0.0f, 1.0f);
+    return minimum_center + focus * (1.0f - widest_window);
+}
+
 bool toggle_enabled(CompositorSettings &settings) noexcept
 {
     settings.enabled = !settings.enabled;

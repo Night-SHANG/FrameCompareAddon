@@ -36,6 +36,8 @@ void publish_dlss5_settings()
             : framecompare::dlss5::Operation::center_full_frame;
     framecompare::dlss5::publish_settings({
         operation, settings.split_position, settings.before_on_left});
+    if (operation != framecompare::dlss5::Operation::center_full_frame)
+        framecompare::dlss5::center::discard_pending();
 }
 
 void draw_panel(reshade::api::effect_runtime *runtime)
@@ -86,13 +88,18 @@ void on_finish_effects(reshade::api::effect_runtime *runtime,
                        reshade::api::resource_view target_srgb)
 {
     if (!framecompare::render::settings().enabled)
+    {
+        framecompare::dlss5::center::discard_pending(runtime);
         return;
+    }
     const auto *current = framecompare::capture::state_for(runtime);
     const bool frozen = framecompare::control::split_motion().settings().frozen;
     const bool pair_ready = current != nullptr && current->pair.ready();
     if (framecompare::control::should_capture_pair(frozen, pair_ready))
         framecompare::capture::on_finish_effects(runtime, commands, target,
                                                  target_srgb);
+    else
+        framecompare::dlss5::center::discard_pending(runtime);
     if (const auto *state = framecompare::capture::state_for(runtime))
         framecompare::render::draw(runtime, commands, target, target_srgb,
                                    *state);

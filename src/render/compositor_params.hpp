@@ -37,6 +37,8 @@ struct ShaderParams
 
 ShaderParams make_shader_params(const CompositorSettings &settings,
                                 bool pair_ready) noexcept;
+float center_source_center(float split_position,
+                           float center_focus) noexcept;
 bool toggle_enabled(CompositorSettings &settings) noexcept;
 void toggle_display_mode(CompositorSettings &settings) noexcept;
 void toggle_border(CompositorSettings &settings) noexcept;

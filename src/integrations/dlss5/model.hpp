@@ -46,6 +46,7 @@ enum class CopyOutcome : std::uint8_t
     empty_region,
     device_mismatch,
     guarded_failure,
+    retained_first_pass,
 };
 
 Compatibility validate_copy(const TextureShape &source,

@@ -1,5 +1,6 @@
 #include "integrations/dlss5/center/bridge.hpp"
 
+#include "integrations/dlss5/center/source_policy.hpp"
 #include "integrations/dlss5/model.hpp"
 
 #include <d3d11_1.h>
@@ -25,6 +26,8 @@ struct BridgeState
     ComPtr<ID3D12Resource> texture12;
     TextureShape shape{};
     std::uint64_t generation = 0;
+    std::uint64_t pending_generation = 0;
+    FirstPassLatch latch;
     Api last_api = Api::none;
     CopyOutcome last_outcome = CopyOutcome::none;
     bool cross_api = false;
@@ -311,6 +314,8 @@ void attach_runtime(reshade::api::effect_runtime *runtime) noexcept
     if (g_state.runtime != runtime || g_state.device11.Get() != device)
     {
         clear_textures();
+        g_state.pending_generation = 0;
+        g_state.latch.release();
         g_state.device11 = device;
         g_state.runtime = runtime;
         g_state.generation = 0;
@@ -323,6 +328,8 @@ void detach_runtime(reshade::api::effect_runtime *runtime) noexcept
     std::lock_guard lock(g_mutex);
     if (g_state.runtime != runtime) return;
     clear_textures();
+    g_state.pending_generation = 0;
+    g_state.latch.release();
     g_state.device11.Reset();
     g_state.runtime = nullptr;
 }
@@ -331,6 +338,8 @@ void shutdown() noexcept
 {
     std::lock_guard lock(g_mutex);
     clear_textures();
+    g_state.pending_generation = 0;
+    g_state.latch.release();
     g_state.device11.Reset();
     g_state.runtime = nullptr;
 }
@@ -339,7 +348,15 @@ CopyOutcome capture_d3d11(ID3D11DeviceContext *context,
                           ID3D11Resource *color) noexcept
 {
     std::lock_guard lock(g_mutex);
+    if (!g_state.latch.try_reserve())
+    {
+        result(Api::d3d11, CopyOutcome::retained_first_pass);
+        return CopyOutcome::retained_first_pass;
+    }
+    g_state.pending_generation = 0;
     const CopyOutcome outcome = guarded_capture11(context, color);
+    if (outcome == CopyOutcome::applied)
+        g_state.pending_generation = g_state.generation;
     result(Api::d3d11, outcome,
            outcome == CopyOutcome::applied ? nullptr : "D3D11 full capture failed");
     return outcome;
@@ -349,7 +366,15 @@ CopyOutcome capture_d3d12(ID3D12GraphicsCommandList *commands,
                           ID3D12Resource *color) noexcept
 {
     std::lock_guard lock(g_mutex);
+    if (!g_state.latch.try_reserve())
+    {
+        result(Api::d3d12, CopyOutcome::retained_first_pass);
+        return CopyOutcome::retained_first_pass;
+    }
+    g_state.pending_generation = 0;
     const CopyOutcome outcome = guarded_capture12(commands, color);
+    if (outcome == CopyOutcome::applied)
+        g_state.pending_generation = g_state.generation;
     result(Api::d3d12, outcome,
            outcome == CopyOutcome::applied ? nullptr : "D3D12 shared capture failed");
     return outcome;
@@ -359,10 +384,24 @@ SourceLease acquire_latest(reshade::api::effect_runtime *runtime,
                            std::uint64_t consumed_generation)
 {
     std::lock_guard lock(g_mutex);
-    if (runtime != g_state.runtime || !g_state.texture11 ||
-        g_state.generation == 0 || g_state.generation <= consumed_generation)
+    if (runtime != g_state.runtime || !g_state.latch.pending())
         return {};
-    return SourceLease(g_state.texture11.Get(), g_state.generation);
+    const std::uint64_t generation = g_state.pending_generation;
+    g_state.pending_generation = 0;
+    g_state.latch.release();
+    if (!g_state.texture11 || generation == 0 ||
+        generation <= consumed_generation)
+        return {};
+    return SourceLease(g_state.texture11.Get(), generation);
+}
+
+void discard_pending(reshade::api::effect_runtime *runtime) noexcept
+{
+    std::lock_guard lock(g_mutex);
+    if (runtime != nullptr && runtime != g_state.runtime)
+        return;
+    g_state.pending_generation = 0;
+    g_state.latch.release();
 }
 
 BridgeSnapshot bridge_snapshot()

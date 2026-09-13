@@ -58,11 +58,14 @@ int main()
     record_result(Api::d3d12, CopyOutcome::applied,
                   make_copy_region(1920, 1080, 0.5f, true));
     record_result(Api::d3d11, CopyOutcome::disabled, {});
+    record_result(Api::d3d11, CopyOutcome::retained_first_pass, {});
     const DiagnosticsSnapshot diagnostics = diagnostics_snapshot();
     assert(diagnostics.d3d12_applied == 1);
     assert(diagnostics.d3d11_skipped == 1);
     assert(diagnostics.last_api == Api::d3d11);
-    assert(diagnostics.last_outcome == CopyOutcome::disabled);
+    assert(diagnostics.last_outcome == CopyOutcome::retained_first_pass);
     assert(copy_outcome_name(CopyOutcome::incompatible) ==
            std::string_view("incompatible"));
+    assert(copy_outcome_name(CopyOutcome::retained_first_pass) ==
+           std::string_view("first-pass-retained"));
 }
