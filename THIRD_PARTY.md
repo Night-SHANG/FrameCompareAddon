@@ -35,6 +35,14 @@
 - Usage: research reference for discovering NGX providers and reading existing
   DLSSNR parameter resources without replacing them.
 
+## DLSS5-Reshade-AIO
+
+- Repository: https://github.com/kibblerz/DLSS5-Reshade-AIO
+- License: Apache-2.0 for repository-owned source.
+- Usage: reference for creating D3D11/D3D12 shared texture pairs in either
+  direction. FrameCompare implements a smaller bridge scoped to its Before
+  capture and does not include or link the AIO project.
+
 ## NVIDIA NGX names
 
 This project declares only the minimal ABI shapes and public parameter/export

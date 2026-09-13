@@ -8,6 +8,7 @@
 #include "control/split_motion.hpp"
 #include "hud/indicator_panel.hpp"
 #include "input/hotkeys.hpp"
+#include "integrations/dlss5/center/bridge.hpp"
 #include "integrations/dlss5/hook_manager.hpp"
 #include "integrations/dlss5/runtime.hpp"
 #include "render/compositor.hpp"
@@ -105,6 +106,8 @@ void draw_compare_page(reshade::api::effect_runtime *runtime)
     {
         const dlss5::HookSnapshot hooks = dlss5::hook_snapshot();
         const dlss5::DiagnosticsSnapshot copies = dlss5::diagnostics_snapshot();
+        const dlss5::center::BridgeSnapshot bridge =
+            dlss5::center::bridge_snapshot();
         ImGui::Text("%s: %s", t(TextId::dlss5_module),
                     t(hooks.module_loaded ? TextId::dlss5_loaded
                                           : TextId::dlss5_waiting));
@@ -131,6 +134,16 @@ void draw_compare_page(reshade::api::effect_runtime *runtime)
                     static_cast<int>(outcome.size()), outcome.data(),
                     copies.last_region.left, copies.last_region.top,
                     copies.last_region.right, copies.last_region.bottom);
+        ImGui::Text("%s: %s (%s=%llu, %s)",
+                    t(TextId::dlss5_center_bridge),
+                    t(bridge.ready ? TextId::dlss5_ready
+                                   : TextId::dlss5_fallback),
+                    t(TextId::dlss5_generation),
+                    static_cast<unsigned long long>(bridge.generation),
+                    bridge.cross_api ? "D3D12->D3D11" : "D3D11");
+        if (!bridge.last_error.empty())
+            ImGui::TextWrapped("%s: %s", t(TextId::dlss5_last_error),
+                               bridge.last_error.c_str());
         if (!hooks.last_error.empty())
             ImGui::TextWrapped("%s: %s", t(TextId::dlss5_last_error),
                                hooks.last_error.c_str());

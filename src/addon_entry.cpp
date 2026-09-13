@@ -3,6 +3,7 @@
 #include "capture/reshade_capture.hpp"
 #include "config/config_runtime.hpp"
 #include "control/split_motion.hpp"
+#include "integrations/dlss5/center/bridge.hpp"
 #include "integrations/dlss5/hook_manager.hpp"
 #include "integrations/dlss5/runtime.hpp"
 #include "render/compositor.hpp"
@@ -26,11 +27,15 @@ namespace
 void publish_dlss5_settings()
 {
     const auto &settings = framecompare::render::settings();
-    const bool effective = settings.enabled && settings.dlss5_before &&
-        settings.display_mode ==
-            framecompare::render::DisplayMode::same_coordinate_wipe;
+    framecompare::dlss5::Operation operation =
+        framecompare::dlss5::Operation::disabled;
+    if (settings.enabled && settings.dlss5_before)
+        operation = settings.display_mode ==
+                framecompare::render::DisplayMode::same_coordinate_wipe
+            ? framecompare::dlss5::Operation::same_coordinate_region
+            : framecompare::dlss5::Operation::center_full_frame;
     framecompare::dlss5::publish_settings({
-        effective, settings.split_position, settings.before_on_left});
+        operation, settings.split_position, settings.before_on_left});
 }
 
 void draw_panel(reshade::api::effect_runtime *runtime)
@@ -43,12 +48,14 @@ void on_init_runtime(reshade::api::effect_runtime *runtime)
 {
     framecompare::capture::on_init_runtime(runtime);
     framecompare::render::on_init_runtime(runtime);
+    framecompare::dlss5::center::attach_runtime(runtime);
 }
 
 void on_destroy_runtime(reshade::api::effect_runtime *runtime)
 {
     framecompare::render::on_destroy_runtime(runtime);
     framecompare::capture::on_destroy_runtime(runtime);
+    framecompare::dlss5::center::detach_runtime(runtime);
 }
 
 void on_reloaded_effects(reshade::api::effect_runtime *runtime)
@@ -120,8 +127,10 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module,
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module,
                                                     HMODULE reshade_module)
 {
-    framecompare::dlss5::publish_settings({false, 0.5f, true});
+    framecompare::dlss5::publish_settings({
+        framecompare::dlss5::Operation::disabled, 0.5f, true});
     framecompare::dlss5::stop_hooks();
+    framecompare::dlss5::center::shutdown();
     framecompare::config::shutdown();
     reshade::unregister_overlay("OSD", framecompare::ui::draw_labels);
     reshade::unregister_overlay(nullptr, draw_panel);

@@ -13,9 +13,16 @@ enum class Api : std::uint8_t
     d3d12,
 };
 
+enum class Operation : std::uint8_t
+{
+    disabled,
+    same_coordinate_region,
+    center_full_frame,
+};
+
 struct SettingsSnapshot
 {
-    bool enabled = false;
+    Operation operation = Operation::disabled;
     float split_position = 0.5f;
     bool before_on_left = true;
 };

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(FrameCompareV2 VERSION 2.1.0 LANGUAGES CXX)
+project(FrameCompareV2 VERSION 2.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ add_library(framecompare_core STATIC
     src/core/capture_cycle.cpp
     src/core/frame_pair.cpp
     src/hud/indicator_model.cpp
+    src/integrations/dlss5/center/source_policy.cpp
     src/integrations/dlss5/model.cpp
     src/integrations/dlss5/runtime.cpp
     src/render/compositor_params.cpp
@@ -59,6 +60,11 @@ if(FRAMECOMPARE_BUILD_TESTS)
     add_executable(dlss5_model_tests tests/dlss5_model_tests.cpp)
     target_link_libraries(dlss5_model_tests PRIVATE framecompare_core)
     add_test(NAME dlss5_model_tests COMMAND dlss5_model_tests)
+
+    add_executable(dlss5_center_source_tests
+        tests/dlss5_center/source_policy_tests.cpp)
+    target_link_libraries(dlss5_center_source_tests PRIVATE framecompare_core)
+    add_test(NAME dlss5_center_source_tests COMMAND dlss5_center_source_tests)
 endif()
 
 if(FRAMECOMPARE_BUILD_ADDON)
@@ -104,6 +110,7 @@ if(FRAMECOMPARE_BUILD_ADDON)
         src/config/settings_encode.cpp
         src/hud/indicator_overlay.cpp
         src/hud/indicator_panel.cpp
+        src/integrations/dlss5/center/bridge.cpp
         src/integrations/dlss5/gpu/d3d11_copy.cpp
         src/integrations/dlss5/gpu/d3d12_copy.cpp
         src/integrations/dlss5/hook_manager.cpp

@@ -43,11 +43,17 @@ int main()
     assert(make_copy_region(1920, 1080, 0.0f, true).empty());
     assert(make_copy_region(1920, 1080, 1.0f, false).empty());
 
-    publish_settings({true, 0.375f, false});
+    publish_settings({Operation::center_full_frame, 0.375f, false});
     const SettingsSnapshot settings = settings_snapshot();
-    assert(settings.enabled);
+    assert(settings.operation == Operation::center_full_frame);
     assert(settings.split_position == 0.375f);
     assert(!settings.before_on_left);
+
+    publish_settings({Operation::same_coordinate_region, 0.625f, true});
+    const SettingsSnapshot same_coordinate = settings_snapshot();
+    assert(same_coordinate.operation == Operation::same_coordinate_region);
+    assert(same_coordinate.split_position == 0.625f);
+    assert(same_coordinate.before_on_left);
 
     record_result(Api::d3d12, CopyOutcome::applied,
                   make_copy_region(1920, 1080, 0.5f, true));

@@ -22,6 +22,7 @@ enum class TextId : std::size_t
     dlss5_diagnostics, dlss5_module, dlss5_waiting, dlss5_loaded,
     dlss5_hooks, dlss5_calls,
     dlss5_copies, dlss5_last_result, dlss5_last_error,
+    dlss5_center_bridge, dlss5_ready, dlss5_fallback, dlss5_generation,
     show_border, border_width, border_opacity, reset_comparison,
     freeze_pair, manual_speed, auto_speed, auto_mode,
     sweep_left_to_right, sweep_right_to_left, sweep_ping_pong,

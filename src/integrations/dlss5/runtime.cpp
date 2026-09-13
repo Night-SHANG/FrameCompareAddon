@@ -9,7 +9,7 @@ namespace framecompare::dlss5
 namespace
 {
 std::atomic<std::uint64_t> g_settings{
-    (static_cast<std::uint64_t>(0x3F000000u) << 2u) | 0x2u};
+    (static_cast<std::uint64_t>(0x3F000000u) << 3u) | 0x4u};
 std::mutex g_diagnostics_mutex;
 DiagnosticsSnapshot g_diagnostics;
 
@@ -31,9 +31,9 @@ float bits_float(std::uint32_t bits) noexcept
 void publish_settings(SettingsSnapshot settings) noexcept
 {
     const std::uint64_t packed =
-        (static_cast<std::uint64_t>(float_bits(settings.split_position)) << 2u) |
-        (settings.enabled ? 0x1u : 0u) |
-        (settings.before_on_left ? 0x2u : 0u);
+        (static_cast<std::uint64_t>(float_bits(settings.split_position)) << 3u) |
+        static_cast<std::uint64_t>(settings.operation) |
+        (settings.before_on_left ? 0x4u : 0u);
     g_settings.store(packed, std::memory_order_release);
 }
 
@@ -41,9 +41,9 @@ SettingsSnapshot settings_snapshot() noexcept
 {
     const std::uint64_t packed = g_settings.load(std::memory_order_acquire);
     SettingsSnapshot result;
-    result.enabled = (packed & 0x1u) != 0;
-    result.before_on_left = (packed & 0x2u) != 0;
-    result.split_position = bits_float(static_cast<std::uint32_t>(packed >> 2u));
+    result.operation = static_cast<Operation>(packed & 0x3u);
+    result.before_on_left = (packed & 0x4u) != 0;
+    result.split_position = bits_float(static_cast<std::uint32_t>(packed >> 3u));
     return result;
 }
 

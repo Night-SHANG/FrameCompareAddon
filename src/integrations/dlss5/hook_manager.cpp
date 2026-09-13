@@ -1,5 +1,6 @@
 #include "integrations/dlss5/hook_manager.hpp"
 
+#include "integrations/dlss5/center/bridge.hpp"
 #include "integrations/dlss5/gpu/d3d11_copy.hpp"
 #include "integrations/dlss5/gpu/d3d12_copy.hpp"
 #include "integrations/dlss5/ngx_abi.hpp"
@@ -159,7 +160,7 @@ EvaluationInfo observe(const abi::Parameter *parameters)
     info.output = output;
     info.color_key = color_key;
     info.output_key = output_key;
-    dimensions(output, info.width, info.height);
+    dimensions(color, info.width, info.height);
     return info;
 }
 
@@ -188,29 +189,45 @@ void apply(Api api, void *commands, const EvaluationInfo &info,
            abi::Result result) noexcept
 {
     const SettingsSnapshot settings = settings_snapshot();
-    if (!settings.enabled)
+    if (settings.operation == Operation::disabled)
         return;
     CopyRegion region{};
     CopyOutcome outcome = CopyOutcome::incomplete_parameters;
     if (abi::succeeded(result) && info.color != nullptr &&
-        info.output != nullptr &&
         info.width <= std::numeric_limits<std::uint32_t>::max())
     {
-        region = make_copy_region(static_cast<std::uint32_t>(info.width),
-                                  info.height, settings.split_position,
-                                  settings.before_on_left);
-        if (region.empty())
-            outcome = CopyOutcome::empty_region;
-        else if (api == Api::d3d11)
-            outcome = apply_d3d11_copy(
-                static_cast<ID3D11DeviceContext *>(commands),
-                static_cast<ID3D11Resource *>(info.color),
-                static_cast<ID3D11Resource *>(info.output), region);
+        if (settings.operation == Operation::center_full_frame)
+        {
+            region = {0, 0, static_cast<std::uint32_t>(info.width),
+                      info.height};
+            outcome = api == Api::d3d11
+                ? center::capture_d3d11(
+                      static_cast<ID3D11DeviceContext *>(commands),
+                      static_cast<ID3D11Resource *>(info.color))
+                : center::capture_d3d12(
+                      static_cast<ID3D12GraphicsCommandList *>(commands),
+                      static_cast<ID3D12Resource *>(info.color));
+        }
+        else if (info.output == nullptr)
+            outcome = CopyOutcome::incomplete_parameters;
         else
-            outcome = apply_d3d12_copy(
-                static_cast<ID3D12GraphicsCommandList *>(commands),
-                static_cast<ID3D12Resource *>(info.color),
-                static_cast<ID3D12Resource *>(info.output), region);
+        {
+            region = make_copy_region(static_cast<std::uint32_t>(info.width),
+                                      info.height, settings.split_position,
+                                      settings.before_on_left);
+            if (region.empty())
+                outcome = CopyOutcome::empty_region;
+            else if (api == Api::d3d11)
+                outcome = apply_d3d11_copy(
+                    static_cast<ID3D11DeviceContext *>(commands),
+                    static_cast<ID3D11Resource *>(info.color),
+                    static_cast<ID3D11Resource *>(info.output), region);
+            else
+                outcome = apply_d3d12_copy(
+                    static_cast<ID3D12GraphicsCommandList *>(commands),
+                    static_cast<ID3D12Resource *>(info.color),
+                    static_cast<ID3D12Resource *>(info.output), region);
+        }
     }
     record_result(api, outcome, region);
 }

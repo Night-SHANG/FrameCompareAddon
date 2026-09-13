@@ -153,9 +153,15 @@ void draw(effect_runtime *runtime, command_list *commands,
         !capture_state.after.ready)
         return;
 
+    resource_view before_view = capture_state.before.view;
+    if (g_settings.dlss5_before &&
+        g_settings.display_mode == DisplayMode::center_remap &&
+        capture_state.pair.before().provenance ==
+            CaptureProvenance::dlss_nr_input &&
+        capture_state.dlss_before.ready)
+        before_view = capture_state.dlss_before.view;
     runtime->update_texture_bindings("FRAMECOMPARE_BEFORE",
-                                     capture_state.before.view,
-                                     capture_state.before.view);
+                                     before_view, before_view);
     runtime->update_texture_bindings("FRAMECOMPARE_AFTER",
                                      capture_state.after.view,
                                      capture_state.after.view);

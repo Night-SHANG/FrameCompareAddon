@@ -25,7 +25,9 @@ struct __declspec(uuid("D10F0929-374E-4820-9498-3F2750A81503")) RuntimeCaptureSt
     std::optional<CaptureCycleTracker> cycle;
     FramePairCoordinator pair;
     CaptureTexture before;
+    CaptureTexture dlss_before;
     CaptureTexture after;
+    std::uint64_t consumed_dlss_generation = 0;
 };
 
 RuntimeCaptureState *state_for(reshade::api::effect_runtime *runtime);

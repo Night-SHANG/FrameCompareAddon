@@ -5,8 +5,8 @@ FrameCompare v2 is a ReShade add-on for same-frame realtime Before/After compari
 ## Current behavior
 
 - Captures the render target immediately before and after the ReShade effect chain.
-- Optionally replaces only the current Before-side region with the pre-DLSS5
-  `DLSSNR.Color` image after a successful D3D11/D3D12 DLSSNR Evaluate call.
+- Optionally uses the pre-DLSS5 `DLSSNR.Color` image for Before after a
+  successful D3D11/D3D12 DLSSNR Evaluate call.
 - Keeps the original generic Pre-ReShade Before path when the DLSS5 option is
   disabled, unavailable or incompatible.
 - Requires both captures to have the same runtime and effect-cycle token.
@@ -66,16 +66,17 @@ then produces this comparison:
 - After side: DLSS5 output with the ReShade preset.
 
 Side order, split position, labels, manual movement, sweep, freeze, border and
-hotkeys continue to use the existing FrameCompare settings. Center-remap mode
-currently falls back to the generic Pre-ReShade FX Before because a safe
-temporary-output lifetime has not been validated for that remapping path. The
-panel displays this limitation when both settings are selected.
+hotkeys continue to use the existing FrameCompare settings. In center-remap
+mode, FrameCompare captures the complete `DLSSNR.Color` resource and copies it
+into its own stable Before texture when a new comparison pair is created. The
+existing center-focus UV calculation is then applied to that texture, so freeze
+and unfreeze retain the same behavior as the generic center-remap path.
 
 The integration is fail-open. A missing module, missing parameter, incompatible
-resource, existing detour or hook failure skips the DLSS5 region copy and leaves
-the original NGX result and generic FrameCompare path available. D3D12 region
-copying was validated in game with DLSS5 still operational. D3D11 is implemented
-from the same validated resource contract but still needs in-game validation.
+resource, unavailable shared bridge, existing detour or hook failure leaves the
+original NGX result and generic FrameCompare path available. D3D12 same-coordinate
+region copying was validated in game with DLSS5 still operational. D3D11 and the
+new D3D12-to-D3D11 center bridge still need in-game validation.
 
 ## Installation and DLSS5 test
 
@@ -96,6 +97,12 @@ comparison, use same-coordinate mode, then check `DLSS5 处理前画面作为 Be
 The matching API's applied counter should increase. `Last result: applied`
 confirms that the pre-DLSS5 region was copied; skipped counters and the last
 error explain why the generic path was used instead.
+
+Switch to center-remap mode and leave the checkbox enabled. `中心捕获: 已就绪`
+with an increasing generation confirms that complete input frames reach the
+bridge. Move the center focus, freeze and unfreeze the pair, then switch between
+display modes. `中心捕获: 回退中` means this frame is using the generic
+Pre-ReShade Before and the bridge error line identifies the rejected condition.
 
 ## Build
 
@@ -119,4 +126,4 @@ THIRD_PARTY.md
 reshade-shaders/Shaders/FrameCompare.fx
 ```
 
-The Phase 1 realtime split was accepted in-game on 2026-09-12. Persistent labels, motion, automatic sweep, direct hotkey capture, freeze and precision controls are implemented in Phase 2. INI persistence and customizable multi-entry status HUD are implemented in Phase 3. The standalone D3D12 DLSSNR validator proved that the in-place region copy can run while DLSS5 remains operational; this behavior is now integrated behind the optional checkbox. The combined build still requires in-game validation with the latest artifact.
+The Phase 1 realtime split was accepted in-game on 2026-09-12. Persistent labels, motion, automatic sweep, direct hotkey capture, freeze and precision controls are implemented in Phase 2. INI persistence and customizable multi-entry status HUD are implemented in Phase 3. The standalone D3D12 DLSSNR validator proved that the in-place region copy can run while DLSS5 remains operational; this behavior is integrated behind the optional checkbox. Version 2.2 adds a complete-input center-remap bridge. The new bridge still requires in-game validation with the latest artifact.
