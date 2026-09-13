@@ -233,6 +233,34 @@ CopyOutcome capture12_impl(ID3D12GraphicsCommandList *commands,
     ++g_state.generation;
     return CopyOutcome::applied;
 }
+
+CopyOutcome guarded_capture11(ID3D11DeviceContext *context,
+                              ID3D11Resource *color) noexcept
+{
+#if defined(_MSC_VER)
+    __try { return capture11_impl(context, color); }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return CopyOutcome::guarded_failure;
+    }
+#else
+    return capture11_impl(context, color);
+#endif
+}
+
+CopyOutcome guarded_capture12(ID3D12GraphicsCommandList *commands,
+                              ID3D12Resource *color) noexcept
+{
+#if defined(_MSC_VER)
+    __try { return capture12_impl(commands, color); }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return CopyOutcome::guarded_failure;
+    }
+#else
+    return capture12_impl(commands, color);
+#endif
+}
 }
 
 SourceLease::SourceLease(ID3D11Texture2D *texture,
@@ -311,13 +339,7 @@ CopyOutcome capture_d3d11(ID3D11DeviceContext *context,
                           ID3D11Resource *color) noexcept
 {
     std::lock_guard lock(g_mutex);
-    CopyOutcome outcome = CopyOutcome::guarded_failure;
-#if defined(_MSC_VER)
-    __try { outcome = capture11_impl(context, color); }
-    __except (EXCEPTION_EXECUTE_HANDLER) {}
-#else
-    outcome = capture11_impl(context, color);
-#endif
+    const CopyOutcome outcome = guarded_capture11(context, color);
     result(Api::d3d11, outcome,
            outcome == CopyOutcome::applied ? nullptr : "D3D11 full capture failed");
     return outcome;
@@ -327,13 +349,7 @@ CopyOutcome capture_d3d12(ID3D12GraphicsCommandList *commands,
                           ID3D12Resource *color) noexcept
 {
     std::lock_guard lock(g_mutex);
-    CopyOutcome outcome = CopyOutcome::guarded_failure;
-#if defined(_MSC_VER)
-    __try { outcome = capture12_impl(commands, color); }
-    __except (EXCEPTION_EXECUTE_HANDLER) {}
-#else
-    outcome = capture12_impl(commands, color);
-#endif
+    const CopyOutcome outcome = guarded_capture12(commands, color);
     result(Api::d3d12, outcome,
            outcome == CopyOutcome::applied ? nullptr : "D3D12 shared capture failed");
     return outcome;
