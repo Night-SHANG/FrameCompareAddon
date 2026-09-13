@@ -2,6 +2,7 @@
 
 #include "integrations/dlss5/model.hpp"
 
+#include <d3d11_1.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
@@ -61,7 +62,8 @@ void result(Api api, CopyOutcome outcome, const char *error = nullptr)
 {
     g_state.last_api = api;
     g_state.last_outcome = outcome;
-    g_state.last_error = error != nullptr ? error : "";
+    try { g_state.last_error = error != nullptr ? error : ""; }
+    catch (...) { g_state.last_error.clear(); }
 }
 
 bool same_adapter(ID3D11Device *device11, ID3D12Device *device12) noexcept
